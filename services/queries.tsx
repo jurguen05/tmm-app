@@ -59,3 +59,13 @@ export async function deleteTransactions(ids: string[]): Promise<void> {
     
   if (error) throw new Error(error.message)
 }
+
+export const getPositions = async () => {
+  const { data, error } = await supabase
+    .from('positions')
+    .select('*')
+    .order('symbol', { ascending: true }); // Ordenamos alfabéticamente por Ticker
+
+  if (error) throw error;
+  return data || [];
+}

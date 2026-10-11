@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import Papa from 'papaparse'
 import { supabase } from '../lib/supabase'
-import { eliminarArchivoStorage, descargarArchivoStorage } from '../lib/storage'
+import { eliminarArchivoPositions, descargarArchivoPositions } from '../lib/storage'
+import { procesarFilasPosiciones } from '../lib/positionsParser'
 
 interface FileUpload {
   id: string;
@@ -12,38 +13,22 @@ interface FileUpload {
   created_at: string;
 }
 
-// 1. AVISAMOS QUE ACEPTA ESTA FUNCIÓN COMO PROP
 interface HistorialProps {
   onDatosActualizados?: () => void;
+  refreshTrigger?: number; // RECIBIMOS EL GATILLO ACÁ
 }
 
-export default function HistorialArchivos({ onDatosActualizados }: HistorialProps) {
+export default function HistorialArchivosPositions({ onDatosActualizados, refreshTrigger }: HistorialProps) {
   const [archivos, setArchivos] = useState<FileUpload[]>([])
   const [cargando, setCargando] = useState(true)
   const [mensaje, setMensaje] = useState('')
-
-  const normalizeNumber = (value: string | undefined | null) => {
-    if (!value) return 0;
-    const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
-    const num = parseFloat(cleanStr);
-    return isNaN(num) ? 0 : num;
-  };
-
-  const procesarFecha = (rawDate: string) => {
-    if (!rawDate) return null;
-    const matches = rawDate.match(/\d{2}\/\d{2}\/\d{4}/g);
-    if (!matches) return null;
-    const finalDate = matches[matches.length - 1];
-    const parts = finalDate.split('/');
-    return `${parts[2]}-${parts[0]}-${parts[1]}`; 
-  };
 
   const cargarArchivos = async () => {
     setCargando(true)
     const { data, error } = await supabase
       .from('file_uploads')
       .select('*')
-      .eq('module', 'transactions')
+      .eq('module', 'positions') 
       .order('created_at', { ascending: false })
       .limit(5)
 
@@ -53,18 +38,19 @@ export default function HistorialArchivos({ onDatosActualizados }: HistorialProp
     setCargando(false)
   }
 
+  // ESCUCHAMOS EL GATILLO: Si refreshTrigger cambia, volvemos a cargar los archivos
   useEffect(() => {
     cargarArchivos()
-  }, [])
+  }, [refreshTrigger])
 
   const handleEliminar = async (id: string, storagePath: string, fileName: string) => {
-    if (!window.confirm(`¿Estás seguro de eliminar "${fileName}"?\n\nESTO BORRARÁ TODAS LAS TRANSACCIONES ASOCIADAS A ESTE ARCHIVO. Esta acción no se puede deshacer.`)) {
+    if (!window.confirm(`¿Estás seguro de eliminar "${fileName}"?\n\nESTO BORRARÁ LA FOTO DE POSICIONES ASOCIADA.`)) {
       return;
     }
 
     setMensaje(`Eliminando "${fileName}"...`)
 
-    const resStorage = await eliminarArchivoStorage(storagePath);
+    const resStorage = await eliminarArchivoPositions(storagePath);
     if (!resStorage.exito) {
       setMensaje(`⚠️ Error al borrar de Storage: ${resStorage.error}`);
     }
@@ -76,27 +62,46 @@ export default function HistorialArchivos({ onDatosActualizados }: HistorialProp
     } else {
       setMensaje(`✅ Archivo eliminado correctamente.`);
       cargarArchivos(); 
-      // 2. ACTUALIZAMOS LA TABLA PADRE
       if (onDatosActualizados) onDatosActualizados();
     }
   }
 
   const handleReprocesar = async (archivo: FileUpload) => {
-    if (!window.confirm(`¿Querés reprocesar "${archivo.file_name}"?\n\nEsto borrará las transacciones actuales y las volverá a generar.`)) {
+    if (!window.confirm(`¿Querés restaurar "${archivo.file_name}"?\n\nEsto borrará la foto actual y cargará las posiciones de este archivo.`)) {
       return;
     }
 
     setMensaje(`Descargando archivo...`)
-    const resDescarga = await descargarArchivoStorage(archivo.storage_path);
+    const resDescarga = await descargarArchivoPositions(archivo.storage_path);
     if (!resDescarga.exito || !resDescarga.data) {
       setMensaje(`⚠️ Error al descargar: ${resDescarga.error}`);
       return;
     }
 
-    setMensaje(`Procesando datos del CSV...`);
+    setMensaje(`Procesando el Position Statement...`);
     const csvText = await resDescarga.data.text();
     const lineas = csvText.split('\n');
-    const lineasLimpias = lineas.map(linea => {
+
+    let statementDate = new Date().toISOString().split('T')[0];
+    if (lineas[0] && lineas[0].includes(' on ')) {
+      const dateMatch = lineas[0].match(/on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+      if (dateMatch) {
+        const parts = dateMatch[1].split('/');
+        const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+        statementDate = `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+      }
+    }
+
+    let headerIndex = 0;
+    for (let i = 0; i < lineas.length; i++) {
+      if (lineas[i].startsWith('Instrument,Qty')) {
+        headerIndex = i;
+        break;
+      }
+    }
+
+    const lineasUtiles = lineas.slice(headerIndex);
+    const lineasLimpias = lineasUtiles.map(linea => {
       let l = linea.trim();
       if (l.startsWith('"') && l.endsWith('"')) {
         l = l.substring(1, l.length - 1).replace(/""/g, '"');
@@ -109,63 +114,20 @@ export default function HistorialArchivos({ onDatosActualizados }: HistorialProp
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
-        const filasProcesadas = [];
-        const matchAccount = archivo.file_name.match(/([A-Z]{3}\d{3})/);
-        const accountId = matchAccount ? matchAccount[1] : 'DESCONOCIDO';
-
-        for (const row of results.data as any[]) {
-          const symbolOriginal = row['Symbol'];
-          if (!symbolOriginal) continue;
-
-          let uniqueKey, symbol, instrument;
-          const optionMatch = symbolOriginal.match(/^([A-Z]+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+(\.\d+)?)\s+([CP])$/);
-
-          if (optionMatch) {
-            const ticker = optionMatch[1];
-            const parts = optionMatch[2].split('/');
-            const expiry = `${parts[1]}/${parts[0]}/${parts[2]}`;
-            const strike = parseFloat(optionMatch[3]);
-            const type = optionMatch[5];
-            uniqueKey = `${ticker}-${expiry} ${strike} ${type}`;
-            symbol = ticker;
-            instrument = 'Option';
-          } else {
-            uniqueKey = symbolOriginal;
-            symbol = symbolOriginal;
-            instrument = 'Stock';
-          }
-
-          const realDate = procesarFecha(row['Date']);
-          if (!realDate) continue;
-
-          filasProcesadas.push({
-            account_id: accountId,
-            date: realDate,
-            action: row['Action'],
-            symbol: symbol,
-            instrument: instrument,
-            unique_key: uniqueKey,
-            quantity: row['Quantity'] ? Math.abs(parseFloat(row['Quantity'].toString().replace(/[^0-9.-]+/g, ''))) : 0,
-            price: normalizeNumber(row['Price']),
-            fees: normalizeNumber(row['Fees & Comm']),
-            amount: normalizeNumber(row['Amount']),
-            position_status: 'Open', 
-            strategy: null,
-            stock_entry_price: instrument === 'Stock' ? normalizeNumber(row['Price']) : null,
-            file_upload_id: archivo.id 
-          });
-        }
+        
+        const filasProcesadas = procesarFilasPosiciones(results.data, statementDate, archivo.id);
 
         if (filasProcesadas.length > 0) {
-          setMensaje('Actualizando base de datos...');
-          await supabase.from('transactions').delete().eq('file_upload_id', archivo.id);
-          const { error: insertError } = await supabase.from('transactions').insert(filasProcesadas);
+          setMensaje('Borrando la foto anterior...');
+          await supabase.from('positions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+          setMensaje('Restaurando posiciones...');
+          const { error: insertError } = await supabase.from('positions').insert(filasProcesadas);
           
           if (insertError) {
             setMensaje('⚠️ Error al guardar: ' + insertError.message);
           } else {
-            setMensaje(`✅ ¡Éxito! Se reprocesaron ${filasProcesadas.length} transacciones.`);
-            // 3. ACTUALIZAMOS LA TABLA PADRE
+            setMensaje(`✅ ¡Éxito! Se restauraron ${filasProcesadas.length} posiciones.`);
             if (onDatosActualizados) onDatosActualizados();
           }
         } else {
@@ -178,7 +140,7 @@ export default function HistorialArchivos({ onDatosActualizados }: HistorialProp
   return (
     <div className="bg-white p-6 rounded-lg shadow mb-6 border border-gray-200">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold text-gray-800">Archivos Importados</h2>
+        <h2 className="text-xl font-bold text-gray-800">File History</h2>
         <button onClick={cargarArchivos} className="text-sm text-indigo-600 hover:text-indigo-800">
           ↻ Actualizar
         </button>
@@ -208,7 +170,7 @@ export default function HistorialArchivos({ onDatosActualizados }: HistorialProp
               {archivos.map((archivo) => (
                 <tr key={archivo.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                    {archivo.file_name.replace(/.*(Transactions_\d+)-.*/, '$1.csv')}
+                    {archivo.file_name.replace(/.*(PositionStatement_?\d*).*/, '$1.csv')}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500 text-center">
                     {new Date(archivo.created_at).toLocaleString()}

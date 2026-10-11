@@ -56,3 +56,47 @@ export const descargarArchivoStorage = async (storagePath: string) => {
     return { exito: false, error: error.message };
   }
 };
+
+export const subirArchivoPositions = async (file: File, accountId: string) => {
+  const path = `${accountId}/${file.name}`;
+  const { data, error } = await supabase.storage.from('Positions').upload(path, file, {
+    upsert: true
+  });
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};
+
+export const descargarArchivoPositions = async (path: string) => {
+  const { data, error } = await supabase.storage.from('Positions').download(path);
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};
+
+export const eliminarArchivoPositions = async (path: string) => {
+  const { data, error } = await supabase.storage.from('Positions').remove([path]);
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};
+
+// ======== FUNCIONES PARA EL BUCKET Mk-tos ========
+
+export const subirArchivoMkTos = async (file: File, accountId: string) => {
+  const path = `${accountId}/${file.name}`;
+  const { data, error } = await supabase.storage.from('Mk-tos').upload(path, file, {
+    upsert: true
+  });
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};
+
+export const descargarArchivoMkTos = async (path: string) => {
+  const { data, error } = await supabase.storage.from('Mk-tos').download(path);
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};
+
+export const eliminarArchivoMkTos = async (path: string) => {
+  const { data, error } = await supabase.storage.from('Mk-tos').remove([path]);
+  if (error) return { exito: false, error: error.message };
+  return { exito: true, data };
+};

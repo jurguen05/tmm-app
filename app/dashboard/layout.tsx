@@ -14,10 +14,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const menuItems = [
-    { nombre: 'Resumen', ruta: '/dashboard' },
-    { nombre: 'Transacciones', ruta: '/dashboard/transactions' },
-    { nombre: 'Posiciones', ruta: '/dashboard/positions' },
-    { nombre: 'ThinkOrSwim', ruta: '/dashboard/mk-tos' },
+    { nombre: 'Summary', ruta: '/dashboard' },
+    { nombre: 'Transactions', ruta: '/dashboard/transactions' },
+    { nombre: 'Positions', ruta: '/dashboard/positions' },
+    { nombre: 'Mk-Tos', ruta: '/dashboard/mk-tos' },
   ]
 
   return (

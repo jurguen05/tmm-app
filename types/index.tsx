@@ -1,5 +1,3 @@
-// types/index.ts
-
 export interface Transaction {
   id: string;
   date: string;
@@ -27,4 +25,21 @@ export interface Strategy {
 export interface Profile {
   id: string;
   role_id: number;
+}
+
+export interface Position {
+  id: string;
+  statement_date: string;
+  unique_key: string;
+  symbol: string;
+  quantity: number;
+  days: number;
+  trade_price: number;
+  stock_mark: number;
+  stock_last: number;
+  delta_position: number;
+  theta: number;
+  option_delta: number;
+  option_theta: number;
+  net_liq: number;
 }

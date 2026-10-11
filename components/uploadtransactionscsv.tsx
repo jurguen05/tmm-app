@@ -175,7 +175,7 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
 
   return (
     <div className="bg-white p-6 rounded-lg shadow mb-6 border border-gray-200">
-      <h2 className="text-xl font-bold mb-4 text-gray-800">Importar Transacciones (CSV)</h2>
+      <h2 className="text-xl font-bold mb-4 text-gray-800">Transactions (CSV)</h2>
       <input 
         type="file" 
         accept=".csv" 

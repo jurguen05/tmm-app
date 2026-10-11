@@ -13,7 +13,7 @@ import {
 } from '../../../services/queries'
 
 import UploadTransactionsCsv from '../../../components/uploadtransactionscsv'
-import HistorialArchivos from '../../../components/HistorialArchivos'
+import HistorialArchivosTransactions from '../../../components/HistorialArchivosTransactions'
 import TransactionsTable from '../../../components/TransactionsTable'
 
 export default function TransactionsPage() {
@@ -109,7 +109,7 @@ export default function TransactionsPage() {
     <div className="p-8">
       <div className="max-w-[95%] mx-auto">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-800">Gestión de Transacciones</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Transactions</h1>
           {/* Un indicador visual de que está recargando silenciosamente */}
           {cargando && <span className="text-sm text-indigo-500 animate-pulse">Sincronizando...</span>}
         </div>
@@ -117,7 +117,7 @@ export default function TransactionsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* LE PASAMOS LA FUNCIÓN COMO "CABLE" */}
           <UploadTransactionsCsv onDatosActualizados={recargarDatos} />
-          <HistorialArchivos onDatosActualizados={recargarDatos} />
+          <HistorialArchivosTransactions onDatosActualizados={recargarDatos} />
         </div>
 
         <div className="bg-white p-4 rounded-lg shadow mb-6 border border-gray-200 flex flex-wrap items-end gap-4 justify-between">
