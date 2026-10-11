@@ -55,10 +55,10 @@ export default function TransactionsTable({
             <th className={thCenter}>Stock Entry Price</th>
             <th className={thCenter}>Quantity</th>
             <th className={thCenter}>Price</th>
-            <th className={thCenter}>Fees</th>
+           {/*<th className={thCenter}>Fees</th>*/}
             <th className={thCenter}>Amount</th>
             <th className={thCenter}>Status</th>
-            <th className={thCenter}>UniqueKey</th>
+          {/*<th className={thCenter}>UniqueKey</th>*/}
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
@@ -75,7 +75,7 @@ export default function TransactionsTable({
                   <input type="checkbox" checked={selectedIds.includes(t.id)} onChange={() => onToggleSeleccion(t.id)} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
                 </td>
                 
-                <td className="px-4 py-3 text-sm font-bold text-indigo-600 text-center">{t.codigo || '-'}</td>
+                <td className="px-4 py-3 text-sm font-bold text-indigo-600 text-center">{t.trade_code || '-'}</td>
                 
                 <td className="px-4 py-3 text-sm text-gray-600 text-center">
                   <select value={t.strategy || ''} onChange={(e) => onActualizarTransaccion(t.id, 'strategy', e.target.value)} className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-center">
@@ -122,14 +122,14 @@ export default function TransactionsTable({
                 
                 <td className={tdCenter}>{t.quantity}</td>
                 <td className={tdRight}>{formatearMoneda(t.price)}</td>
-                <td className={tdRight}>{formatearMoneda(t.fees)}</td>
+                {/*<td className={tdRight}>{formatearMoneda(t.fees)}</td>*/}
                 <td className={tdRight}>{formatearMoneda(t.amount)}</td>
                 
                 <td className="px-4 py-3 text-sm text-center">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${t.position_status === 'Open' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{t.position_status || 'Open'}</span>
                 </td>
                 
-                <td className="px-4 py-3 text-sm text-gray-900 font-bold whitespace-nowrap text-center">{t.unique_key}</td>
+                 {/*<td className="px-4 py-3 text-sm text-gray-900 font-bold whitespace-nowrap text-center">{t.unique_key}</td>*/}
               </tr>
             ))
           )}

@@ -5,7 +5,7 @@ import Papa from 'papaparse'
 import { supabase } from '../lib/supabase'
 import { subirArchivoOriginal } from '../lib/storage'
 
-// 1. AVISAMOS QUE ACEPTA ESTA FUNCIÓN COMO PROP
+// AVISAMOS QUE ACEPTA ESTA FUNCIÓN COMO PROP
 interface UploadProps {
   onDatosActualizados?: () => void;
 }
@@ -14,7 +14,6 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
   const [mensaje, setMensaje] = useState('')
   const [cargando, setCargando] = useState(false)
 
-  // ... (toda tu función normalizeNumber y procesarFecha quedan igual) ...
   const normalizeNumber = (value: string | undefined | null) => {
     if (!value) return 0;
     const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
@@ -100,8 +99,13 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
             const realDate = procesarFecha(row['Date']);
             if (!realDate) continue;
 
+            // ACÁ ESTÁ EL CAMBIO: Leemos directo la columna trade_code del Excel
+            const rawCode = row['trade_code'];
+            const parsedCode = rawCode ? parseInt(rawCode.toString().replace(/[^0-9.-]+/g, '')) : null;
+
             filasProcesadas.push({
               account_id: accountId,
+              trade_code: isNaN(parsedCode as number) ? null : parsedCode,
               date: realDate,
               action: row['Action'],
               symbol: symbol,
@@ -158,7 +162,7 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
             } else {
               setMensaje(`✅ ¡Éxito! Archivo guardado y ${filasProcesadas.length} transacciones procesadas.`);
               e.target.value = '';
-              // 2. ACÁ LLAMAMOS A LA FUNCIÓN PARA QUE ACTUALICE LA TABLA SOLA
+              // LLAMAMOS A LA FUNCIÓN PARA QUE ACTUALICE LA TABLA SOLA
               if (onDatosActualizados) {
                 onDatosActualizados();
               }

@@ -29,7 +29,7 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
       .select('*')
       .eq('module', 'mk-tos')
       .order('created_at', { ascending: false })
-      .limit(10)
+      .limit(3) // <-- ACÁ LE DECIMOS QUE TRAIGA SOLO LOS 3 MÁS NUEVOS
 
     if (!error && data) {
       setArchivos(data)
@@ -130,6 +130,13 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      
+      {/* Mensaje sutil indicando que hay más historial oculto */}
+      {!cargando && archivos.length === 3 && (
+        <div className="text-xs text-gray-400 mt-3 text-right italic">
+          Mostrando las 3 subidas más recientes.
         </div>
       )}
     </div>

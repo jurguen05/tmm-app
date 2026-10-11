@@ -43,7 +43,7 @@ export default function PositionsPage() {
           <h1 className="text-2xl font-bold text-gray-800">Positions</h1>
           {statementDate && (
             <p className="text-lg text-gray-600 mt-2">
-              Positions Date: <span className="text-xl font-bold text-indigo-600">{statementDate}</span>
+              Date: <span className="text-xl font-bold text-indigo-600">{statementDate}</span>
             </p>
           )}
         </div>

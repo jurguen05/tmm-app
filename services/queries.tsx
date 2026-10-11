@@ -22,6 +22,7 @@ export async function getTransactions(): Promise<Transaction[]> {
   const { data, error } = await supabase
     .from('transactions')
     .select('*')
+    .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     
   if (error) throw new Error(error.message)

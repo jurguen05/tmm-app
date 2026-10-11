@@ -1,22 +1,44 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { supabase } from '../../../lib/supabase'
 import UploadMkTosCsv from '../../../components/UploadMkTosCsv'
 import HistorialArchivosMkTos from '../../../components/HistorialArchivosMkTos'
+import MkTosTable from '../../../components/MkTosTable'
 
 export default function MkTosPage() {
-  // GATILLO: Estado para forzar la recarga del historial
   const [refreshHistorial, setRefreshHistorial] = useState(0)
+  const [quotes, setQuotes] = useState<any[]>([])
+  const [cargando, setCargando] = useState(true)
 
-  // Esta función se dispara cuando el Upload termina de subir un archivo con éxito,
-  // o cuando el Historial elimina uno.
-  const recargarDatos = () => {
-    // Movemos el gatillo para que el Historial se entere y se recargue
+  const recargarDatos = async () => {
+    setCargando(true)
+    // 1. Forzamos la actualización del historial visual
     setRefreshHistorial(prev => prev + 1)
     
-    // NOTA: Acá a futuro también llamaremos a la base de datos 
-    // para traer todas las cotizaciones activas y pasárselas a la tabla.
+    // 2. Buscamos todas las cotizaciones de archivos NO archivados
+    const { data, error } = await supabase
+      .from('mk_tos_quotes')
+      .select(`
+        *,
+        file_uploads!inner(is_archived)
+      `)
+      .eq('file_uploads.is_archived', false)
+      .order('symbol', { ascending: true })
+
+    if (error) {
+      console.error('Error cargando cotizaciones:', error.message)
+    } else {
+      setQuotes(data || [])
+    }
+    
+    setCargando(false)
   }
+
+  // Cargar la tabla al entrar a la página
+  useEffect(() => {
+    recargarDatos()
+  }, [])
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -27,7 +49,6 @@ export default function MkTosPage() {
         </p>
       </div>
 
-      {/* GRILLA: Upload y Historial */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <UploadMkTosCsv onDatosActualizados={recargarDatos} />
         
@@ -37,10 +58,8 @@ export default function MkTosPage() {
         />
       </div>
 
-      {/* TABLA PRINCIPAL (Próximo paso) */}
-      <div className="bg-white p-6 rounded-lg shadow border border-gray-200 text-center text-gray-500">
-        Acá irá la gran tabla unificada mostrando los datos de todos los archivos activos.
-      </div>
+      {/* Renderizamos la Gran Tabla */}
+      <MkTosTable quotes={quotes} cargando={cargando} />
     </div>
   )
 }

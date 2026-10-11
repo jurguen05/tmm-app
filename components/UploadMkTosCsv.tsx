@@ -131,7 +131,7 @@ export default function UploadMkTosCsv({ onDatosActualizados }: UploadProps) {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
-      <h2 className="text-xl font-bold mb-4 text-gray-800">Actualizar Cotizaciones (MK-TOS)</h2>
+      <h2 className="text-xl font-bold mb-4 text-gray-800">MK-TOS (CSV)</h2>
       <input 
         type="file" 
         accept=".csv" 

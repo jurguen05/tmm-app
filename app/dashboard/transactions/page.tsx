@@ -23,9 +23,9 @@ export default function TransactionsPage() {
   const [rol, setRol] = useState<number | null>(null)
   
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [filtros, setFiltros] = useState({ codigo: '', symbol: '', strategy: '', status: '' })
+  // 1. ACTUALIZADO: Estado inicial del filtro
+  const [filtros, setFiltros] = useState({ trade_code: '', symbol: '', strategy: '', status: '' })
 
-  // AISLAMOS LA FUNCIÓN DE CARGA PARA PODER LLAMARLA CUANDO QUERAMOS
   const recargarDatos = async () => {
     setCargando(true)
     const { data: { session } } = await supabase.auth.getSession()
@@ -45,7 +45,6 @@ export default function TransactionsPage() {
     setCargando(false)
   }
 
-  // Se ejecuta automáticamente solo la primera vez que entrás a la página
   useEffect(() => {
     recargarDatos()
   }, [])
@@ -75,7 +74,8 @@ export default function TransactionsPage() {
   }
 
   const txsFiltradas = transacciones.filter(t => {
-    const matchCodigo = filtros.codigo === '' || (t.codigo && t.codigo.toString().includes(filtros.codigo));
+    // 2. ACTUALIZADO: Lógica de filtrado leyendo t.trade_code
+    const matchCodigo = filtros.trade_code === '' || (t.trade_code && t.trade_code.toString().includes(filtros.trade_code));
     const matchSymbol = filtros.symbol === '' || (t.symbol && t.symbol.toLowerCase().includes(filtros.symbol.toLowerCase()));
     const matchStrategy = filtros.strategy === '' || (t.strategy && t.strategy === filtros.strategy);
     const matchStatus = filtros.status === '' || (t.position_status && t.position_status.toLowerCase() === filtros.status.toLowerCase());
@@ -110,12 +110,10 @@ export default function TransactionsPage() {
       <div className="max-w-[95%] mx-auto">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-800">Transactions</h1>
-          {/* Un indicador visual de que está recargando silenciosamente */}
           {cargando && <span className="text-sm text-indigo-500 animate-pulse">Sincronizando...</span>}
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* LE PASAMOS LA FUNCIÓN COMO "CABLE" */}
           <UploadTransactionsCsv onDatosActualizados={recargarDatos} />
           <HistorialArchivosTransactions onDatosActualizados={recargarDatos} />
         </div>
@@ -124,7 +122,8 @@ export default function TransactionsPage() {
           <div className="flex flex-wrap gap-4 flex-1">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Buscar Código</label>
-              <input type="text" placeholder="Ej: 42" value={filtros.codigo} onChange={(e) => setFiltros({...filtros, codigo: e.target.value})} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-28" />
+              {/* 3. ACTUALIZADO: Input leyendo y escribiendo en filtros.trade_code */}
+              <input type="text" placeholder="Ej: 42" value={filtros.trade_code} onChange={(e) => setFiltros({...filtros, trade_code: e.target.value})} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-28" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Buscar Símbolo</label>
