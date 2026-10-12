@@ -1,7 +1,8 @@
 export interface Transaction {
   id: string;
   date: string;
-  codigo: number | null;
+  codigo?: number | null;
+  trade_code?: number | null;
   action: string;
   symbol: string;
   unique_key: string;
@@ -10,9 +11,13 @@ export interface Transaction {
   price: number;
   amount: number;
   stock_entry_price: number | null;
-  strategy: string | null;
+  strategy?: string | null;
+  strategy_id?: number | null;
+  strategies?: { name: string } | null;
   position_status: 'Open' | 'Closed';
   created_at?: string;
+  file_upload_id?: string;
+  account_id?: string;
 }
 
 export interface Strategy {

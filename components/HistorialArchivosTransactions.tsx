@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import Papa from 'papaparse'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { eliminarArchivoStorage, descargarArchivoStorage } from '../lib/storage'
+import { parsearFechaTOS } from '../lib/formatters'
 
 interface FileUpload {
   id: string;
@@ -12,12 +14,8 @@ interface FileUpload {
   created_at: string;
 }
 
-// 1. AVISAMOS QUE ACEPTA ESTA FUNCIÓN COMO PROP
-interface HistorialProps {
-  onDatosActualizados?: () => void;
-}
-
-export default function HistorialArchivosTransactions({ onDatosActualizados }: HistorialProps) {
+export default function HistorialArchivosTransactions() {
+  const router = useRouter()
   const [archivos, setArchivos] = useState<FileUpload[]>([])
   const [cargando, setCargando] = useState(true)
   const [mensaje, setMensaje] = useState('')
@@ -27,15 +25,6 @@ export default function HistorialArchivosTransactions({ onDatosActualizados }: H
     const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
     const num = parseFloat(cleanStr);
     return isNaN(num) ? 0 : num;
-  };
-
-  const procesarFecha = (rawDate: string) => {
-    if (!rawDate) return null;
-    const matches = rawDate.match(/\d{2}\/\d{2}\/\d{4}/g);
-    if (!matches) return null;
-    const finalDate = matches[matches.length - 1];
-    const parts = finalDate.split('/');
-    return `${parts[2]}-${parts[0]}-${parts[1]}`; 
   };
 
   const cargarArchivos = async () => {
@@ -76,8 +65,7 @@ export default function HistorialArchivosTransactions({ onDatosActualizados }: H
     } else {
       setMensaje(`✅ Archivo eliminado correctamente.`);
       cargarArchivos(); 
-      // 2. ACTUALIZAMOS LA TABLA PADRE
-      if (onDatosActualizados) onDatosActualizados();
+      router.refresh(); // Forzamos actualización en el servidor
     }
   }
 
@@ -135,7 +123,7 @@ export default function HistorialArchivosTransactions({ onDatosActualizados }: H
             instrument = 'Stock';
           }
 
-          const realDate = procesarFecha(row['Date']);
+          const realDate = parsearFechaTOS(row['Date']);
           if (!realDate) continue;
 
           filasProcesadas.push({
@@ -165,8 +153,7 @@ export default function HistorialArchivosTransactions({ onDatosActualizados }: H
             setMensaje('⚠️ Error al guardar: ' + insertError.message);
           } else {
             setMensaje(`✅ ¡Éxito! Se reprocesaron ${filasProcesadas.length} transacciones.`);
-            // 3. ACTUALIZAMOS LA TABLA PADRE
-            if (onDatosActualizados) onDatosActualizados();
+            router.refresh(); // Forzamos actualización en el servidor
           }
         } else {
           setMensaje('No se encontraron datos válidos en el CSV al reprocesar.');

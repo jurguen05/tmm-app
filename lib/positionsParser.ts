@@ -16,6 +16,8 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
   };
 
   let currentTicker = ''; 
+  let currentStockMark = 0;
+  let currentStockLast = 0;
 
   for (const row of csvData) {
     const symbolOriginal = row['Instrument'];
@@ -24,12 +26,18 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
 
     let uniqueKey, symbol;
     let isHeaderRow = false; 
+    let isOption = false;
 
     if (!symbolOriginal.includes(' ')) {
       currentTicker = symbolOriginal;
       uniqueKey = currentTicker;
       symbol = currentTicker;
       
+      const rowLast = normalizeNumber(row['Last']);
+      const rowMark = normalizeNumber(row['Mark']);
+      currentStockLast = rowLast > 0 ? rowLast : 0;
+      currentStockMark = rowMark > 0 ? rowMark : (rowLast > 0 ? rowLast : 0);
+
       if (!row['Qty'] || row['Qty'].trim() === '') {
         isHeaderRow = true; 
       }
@@ -37,6 +45,7 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
       const optionMatch = symbolOriginal.match(/^(\d+)\s+(\d{1,2})\s+([A-Z]{3})\s+(\d{2})\s+(\d+(\.\d+)?)\s+(CALL|PUT)$/);
       
       if (optionMatch) {
+        isOption = true;
         const day = optionMatch[2].padStart(2, '0');
         const mm = monthMap[optionMatch[3]];
         const yyyy = "20" + optionMatch[4];
@@ -46,6 +55,11 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
         uniqueKey = `${currentTicker}-${mm}/${day}/${yyyy} ${strike} ${type}`;
         symbol = currentTicker;
       } else {
+        // Fila descriptiva (nombre de empresa, ej: "AVANTOR INC")
+        const rowLast = normalizeNumber(row['Last']);
+        const rowMark = normalizeNumber(row['Mark']);
+        if (rowLast > 0) currentStockLast = rowLast;
+        if (rowMark > 0) currentStockMark = rowMark;
         continue; 
       }
     }
@@ -62,6 +76,10 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
         continue;
       }
 
+      // Si es una opción, usamos el Mark y Last de la acción subyacente
+      const stockMark = isOption && currentStockMark > 0 ? currentStockMark : normalizeNumber(row['Mark']);
+      const stockLast = isOption && currentStockLast > 0 ? currentStockLast : normalizeNumber(row['Last']);
+
       const fila: any = {
         statement_date: statementDate,
         unique_key: uniqueKey,
@@ -69,8 +87,8 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
         quantity: qty,
         days: normalizeNumber(row['Days']),
         trade_price: normalizeNumber(row['Trade Price']),
-        stock_mark: normalizeNumber(row['Mark']),
-        stock_last: normalizeNumber(row['Last']),
+        stock_mark: stockMark,
+        stock_last: stockLast,
         delta_position: normalizeNumber(row['Delta']),
         theta: normalizeNumber(row['Theta']),
         option_delta: normalizeNumber(row['OptionDelta']),

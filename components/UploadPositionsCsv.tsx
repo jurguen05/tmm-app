@@ -2,15 +2,14 @@
 
 import { useState } from 'react'
 import Papa from 'papaparse'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { subirArchivoPositions } from '../lib/storage'
-import { procesarFilasPosiciones } from '../lib/positionsParser' // <-- IMPORTAMOS TU NUEVO HELPER
+import { procesarFilasPosiciones } from '../lib/positionsParser'
+import { parsearFechaTOS } from '../lib/formatters'
 
-interface UploadProps {
-  onDatosActualizados?: () => void;
-}
-
-export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps) {
+export default function UploadPositionsCsv() {
+  const router = useRouter()
   const [mensaje, setMensaje] = useState('')
   const [cargando, setCargando] = useState(false)
 
@@ -42,18 +41,10 @@ export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps)
 
     const reader = new FileReader();
     reader.onload = async (event) => {
-      let csvText = event.target?.result as string;
+      const csvText = event.target?.result as string;
       const lineas = csvText.split('\n');
 
-      let statementDate = new Date().toISOString().split('T')[0]; 
-      if (lineas[0] && lineas[0].includes(' on ')) {
-        const dateMatch = lineas[0].match(/on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-        if (dateMatch) {
-          const parts = dateMatch[1].split('/');
-          const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-          statementDate = `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
-        }
-      }
+      const statementDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0];
 
       let headerIndex = 0;
       for (let i = 0; i < lineas.length; i++) {
@@ -78,7 +69,6 @@ export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps)
         skipEmptyLines: true,
         complete: async (results) => {
           
-          // MAGIA: Llamamos a tu helper y le pasamos los datos y la fecha
           const filasProcesadas = procesarFilasPosiciones(results.data, statementDate);
 
           if (filasProcesadas.length > 0) {
@@ -111,7 +101,6 @@ export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps)
             setMensaje('Borrando la "foto" anterior...');
             await supabase.from('positions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
-            // Le inyectamos el ID del archivo a todas las filas antes de guardarlas
             const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
 
             setMensaje('Insertando posiciones actuales...');
@@ -122,7 +111,8 @@ export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps)
             } else {
               setMensaje(`✅ ¡Éxito! Foto actualizada con ${filasProcesadas.length} posiciones.`);
               e.target.value = '';
-              if (onDatosActualizados) onDatosActualizados();
+              // FORZAMOS LA ACTUALIZACIÓN DEL SERVIDOR
+              router.refresh();
             }
           } else {
             setMensaje('No se encontraron posiciones válidas en el CSV.');
@@ -134,7 +124,7 @@ export default function UploadPositionsCsv({ onDatosActualizados }: UploadProps)
     reader.readAsText(file);
   };
 
-  return (
+ return (
     <div className="bg-white p-6 rounded-lg shadow border border-gray-200">
       <h2 className="text-xl font-bold mb-4 text-gray-800">Position Statement (CVS)</h2>
       <input 

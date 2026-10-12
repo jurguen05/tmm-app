@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Transaction, Strategy } from '../types'
-import { formatearMoneda } from '../lib/formatters'
+import { formatearMoneda, formatearFecha } from '../lib/formatters'
 
 interface TransactionsTableProps {
   transacciones: Transaction[]
@@ -42,7 +42,7 @@ export default function TransactionsTable({
               <input 
                 type="checkbox" 
                 onChange={onToggleSeleccionarTodas} 
-                checked={transacciones.length > 0 && selectedIds.length === transacciones.length} 
+                checked={transacciones.length > 0 && transacciones.every((t) => selectedIds.includes(t.id))} 
                 className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" 
               />
             </th>
@@ -78,16 +78,23 @@ export default function TransactionsTable({
                 <td className="px-4 py-3 text-sm font-bold text-indigo-600 text-center">{t.trade_code || '-'}</td>
                 
                 <td className="px-4 py-3 text-sm text-gray-600 text-center">
-                  <select value={t.strategy || ''} onChange={(e) => onActualizarTransaccion(t.id, 'strategy', e.target.value)} className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-center">
+                  <select 
+                    value={t.strategy_id || ''} 
+                    onChange={(e) => {
+                      const nuevoId = e.target.value ? Number(e.target.value) : null;
+                      onActualizarTransaccion(t.id, 'strategy_id', nuevoId);
+                    }} 
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-center"
+                  >
                     <option value="">Seleccionar...</option>
                     {estrategias.map(est => (
-                      <option key={est.id} value={est.name}>{est.name}</option>
+                      <option key={est.id} value={est.id}>{est.name}</option>
                     ))}
                   </select>
                 </td>
                 
                 <td className="px-4 py-3 text-sm font-semibold text-gray-800 text-center">{t.symbol}</td>
-                <td className={`${tdCenter} whitespace-nowrap`}>{new Date(t.date).toLocaleDateString()}</td>
+                <td className={`${tdCenter} whitespace-nowrap`}>{formatearFecha(t.date)}</td>
                 <td className={tdCenter}>
                   <span className={`px-2 py-1 rounded text-xs font-medium ${t.instrument === 'Stock' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{t.instrument}</span>
                 </td>

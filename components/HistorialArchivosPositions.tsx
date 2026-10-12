@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Papa from 'papaparse'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { eliminarArchivoPositions, descargarArchivoPositions } from '../lib/storage'
 import { procesarFilasPosiciones } from '../lib/positionsParser'
+import { parsearFechaTOS } from '../lib/formatters'
 
 interface FileUpload {
   id: string;
@@ -13,12 +15,8 @@ interface FileUpload {
   created_at: string;
 }
 
-interface HistorialProps {
-  onDatosActualizados?: () => void;
-  refreshTrigger?: number; // RECIBIMOS EL GATILLO ACÁ
-}
-
-export default function HistorialArchivosPositions({ onDatosActualizados, refreshTrigger }: HistorialProps) {
+export default function HistorialArchivosPositions() {
+  const router = useRouter()
   const [archivos, setArchivos] = useState<FileUpload[]>([])
   const [cargando, setCargando] = useState(true)
   const [mensaje, setMensaje] = useState('')
@@ -38,10 +36,10 @@ export default function HistorialArchivosPositions({ onDatosActualizados, refres
     setCargando(false)
   }
 
-  // ESCUCHAMOS EL GATILLO: Si refreshTrigger cambia, volvemos a cargar los archivos
+  // Se ejecuta solo al montar. (Ver advertencia arquitectónica arriba)
   useEffect(() => {
     cargarArchivos()
-  }, [refreshTrigger])
+  }, [])
 
   const handleEliminar = async (id: string, storagePath: string, fileName: string) => {
     if (!window.confirm(`¿Estás seguro de eliminar "${fileName}"?\n\nESTO BORRARÁ LA FOTO DE POSICIONES ASOCIADA.`)) {
@@ -61,8 +59,8 @@ export default function HistorialArchivosPositions({ onDatosActualizados, refres
       setMensaje(`⚠️ Error al borrar registro: ${error.message}`);
     } else {
       setMensaje(`✅ Archivo eliminado correctamente.`);
-      cargarArchivos(); 
-      if (onDatosActualizados) onDatosActualizados();
+      cargarArchivos(); // Actualiza el historial local
+      router.refresh(); // Forzamos la actualización del servidor (tabla)
     }
   }
 
@@ -82,15 +80,7 @@ export default function HistorialArchivosPositions({ onDatosActualizados, refres
     const csvText = await resDescarga.data.text();
     const lineas = csvText.split('\n');
 
-    let statementDate = new Date().toISOString().split('T')[0];
-    if (lineas[0] && lineas[0].includes(' on ')) {
-      const dateMatch = lineas[0].match(/on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-      if (dateMatch) {
-        const parts = dateMatch[1].split('/');
-        const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-        statementDate = `${year}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
-      }
-    }
+    const statementDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(archivo.file_name) || new Date().toISOString().split('T')[0];
 
     let headerIndex = 0;
     for (let i = 0; i < lineas.length; i++) {
@@ -128,7 +118,7 @@ export default function HistorialArchivosPositions({ onDatosActualizados, refres
             setMensaje('⚠️ Error al guardar: ' + insertError.message);
           } else {
             setMensaje(`✅ ¡Éxito! Se restauraron ${filasProcesadas.length} posiciones.`);
-            if (onDatosActualizados) onDatosActualizados();
+            router.refresh(); // Forzamos la actualización del servidor (tabla)
           }
         } else {
           setMensaje('No se encontraron datos válidos en el CSV al reprocesar.');

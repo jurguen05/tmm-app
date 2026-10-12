@@ -1,105 +1,176 @@
-'use client'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { connection } from 'next/server'
+import Link from 'next/link'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
-import StrategiesStopsTable from '../../components/StrategiesStopsTable'
+export const instant = false
 
-export default function DashboardPage() {
-  const [datosCruzados, setDatosCruzados] = useState<any[]>([])
-  const [cargando, setCargando] = useState(true)
-
-  const cargarPanelControl = async () => {
-    setCargando(true)
-
-    try {
-      // 1. Traer Posiciones vigentes
-      const { data: positions } = await supabase.from('positions').select('*')
-      if (!positions || positions.length === 0) {
-        setDatosCruzados([])
-        setCargando(false)
-        return
-      }
-
-      // 2. Traer Transacciones (solo las que coinciden con los unique_key de nuestras posiciones)
-      const uniqueKeys = positions.map(p => p.unique_key)
-      const { data: transactions } = await supabase
-        .from('transactions')
-        .select('*')
-        .in('unique_key', uniqueKeys)
-
-      // 3. Traer MK-TOS (solo los activos)
-      const { data: mktos } = await supabase
-        .from('mk_tos_quotes')
-        .select(`*, file_uploads!inner(is_archived)`)
-        .eq('file_uploads.is_archived', false)
-
-      // 4. EL CRUCE DE DATOS (El Cerebro)
-      const consolidado = positions.map((pos) => {
-        // Filtramos las transacciones de este código
-        const txsDelCodigo = transactions?.filter(t => t.unique_key === pos.unique_key) || []
-
-        // A. Buscar el trade_code
-        const trade_code = txsDelCodigo.length > 0 ? txsDelCodigo[0].trade_code : '-'
-
-        // B. Buscar Strategy (última con status "Open")
-        const txsOpen = txsDelCodigo.filter(t => t.status === 'Open' || t.status === 'open')
-        const txsOpenOrdenadas = txsOpen.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        const strategy = txsOpenOrdenadas.length > 0 ? txsOpenOrdenadas[0].strategy : 'S/D'
-
-        // C. Buscar Entry Price (primera compra, fechas de menor a mayor)
-        const txsOrdenadasFechas = [...txsDelCodigo].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-        const entryPrice = txsOrdenadasFechas.length > 0 ? txsOrdenadasFechas[0].stock_entry_price : 0
-
-        // D. Buscar Last Price (en MK-TOS por Symbol)
-        const quotesDelSymbol = mktos?.filter(m => m.symbol === pos.symbol) || []
-        const quotesOrdenadas = quotesDelSymbol.sort((a, b) => new Date(b.quote_date).getTime() - new Date(a.quote_date).getTime())
-        const lastPrice = quotesOrdenadas.length > 0 ? quotesOrdenadas[0].last_price : 0
-
-        // E. Calcular Rentabilidad: (Last / Entry Price) - 1
-        let rentabilidad = 0
-        if (entryPrice > 0 && lastPrice > 0) {
-          rentabilidad = (lastPrice / entryPrice) - 1
-        }
-
-        return {
-          id: pos.id,
-          trade_code: trade_code,
-          symbol: pos.symbol,
-          strategy: strategy,
-          entryPrice: entryPrice,
-          lastPrice: lastPrice,
-          stop: '-', // MAQUETA: A completar cuando veamos las reglas
-          rentabilidad: rentabilidad
-        }
-      })
-
-      // === NUEVO: ORDENAMOS LA LISTA ALFABÉTICAMENTE POR SYMBOL ===
-      consolidado.sort((a, b) => a.symbol.localeCompare(b.symbol))
-
-      setDatosCruzados(consolidado)
-
-    } catch (error) {
-      console.error("Error cruzando datos:", error)
+export default async function DashboardPage() {
+  await connection()
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+      },
     }
+  )
 
-    setCargando(false)
-  }
-
-  useEffect(() => {
-    cargarPanelControl()
-  }, [])
+  // Fetch summary counts for KPI cards
+  const [
+    { count: positionsCount },
+    { count: transactionsCount },
+    { count: quotesCount },
+    { count: strategiesCount }
+  ] = await Promise.all([
+    supabase.from('positions').select('*', { count: 'exact', head: true }),
+    supabase.from('transactions').select('*', { count: 'exact', head: true }),
+    supabase.from('mk_tos_quotes').select('*', { count: 'exact', head: true }),
+    supabase.from('strategies').select('*', { count: 'exact', head: true }).eq('is_active', true)
+  ])
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-        <p className="text-gray-600 mt-2">
-          Revisión diaria: Posiciones activas, stops y rentabilidad.
+    <div className="p-8 max-w-7xl mx-auto space-y-8">
+      {/* HEADER */}
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Summary</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Trading Management System &bull; System Overview
         </p>
       </div>
 
-      {/* Renderizamos la tabla consolidada en el Dashboard */}
-      <StrategiesStopsTable datos={datosCruzados} cargando={cargando} />
+      {/* KPI METRIC CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Active Positions */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Positions</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{positionsCount ?? 0}</p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+            📊
+          </div>
+        </div>
+
+        {/* Total Transactions */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Transactions</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{transactionsCount ?? 0}</p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+            💳
+          </div>
+        </div>
+
+        {/* Market Quotes */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Market Quotes</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{quotesCount ?? 0}</p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+            📈
+          </div>
+        </div>
+
+        {/* Active Strategies */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Strategies</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{strategiesCount ?? 0}</p>
+          </div>
+          <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
+            🎯
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK MODULE ACCESS CARDS */}
+      <div>
+        <h2 className="text-base font-bold text-gray-800 mb-4">Modules & Navigation</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Strategies Stops Card */}
+          <Link
+            href="/dashboard/strategies-stops"
+            className="group block p-6 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">🎯</span>
+                <div>
+                  <h3 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">Strategies Stops</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Active positions consolidated with strategies, stops & profitability</p>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* Transactions Card */}
+          <Link
+            href="/dashboard/transactions"
+            className="group block p-6 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">💳</span>
+                <div>
+                  <h3 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">Transactions</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Review and manage transaction logs, strategy allocations and prices</p>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* Positions Card */}
+          <Link
+            href="/dashboard/positions"
+            className="group block p-6 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📊</span>
+                <div>
+                  <h3 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">Positions</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Position statements snapshots from ThinkorSwim platform</p>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* MK-TOS Card */}
+          <Link
+            href="/dashboard/mk-tos"
+            className="group block p-6 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-400 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📈</span>
+                <div>
+                  <h3 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">MK-TOS</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Daily quote statements, moving averages and market depth metrics</p>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-gray-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+        </div>
+      </div>
     </div>
   )
 }

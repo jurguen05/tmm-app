@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { eliminarArchivoMkTos } from '../lib/storage'
 
@@ -12,12 +13,8 @@ interface FileUpload {
   is_archived: boolean;
 }
 
-interface HistorialProps {
-  onDatosActualizados?: () => void;
-  refreshTrigger?: number;
-}
-
-export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTrigger }: HistorialProps) {
+export default function HistorialArchivosMkTos() {
+  const router = useRouter()
   const [archivos, setArchivos] = useState<FileUpload[]>([])
   const [cargando, setCargando] = useState(true)
   const [mensaje, setMensaje] = useState('')
@@ -29,7 +26,7 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
       .select('*')
       .eq('module', 'mk-tos')
       .order('created_at', { ascending: false })
-      .limit(3) // <-- ACÁ LE DECIMOS QUE TRAIGA SOLO LOS 3 MÁS NUEVOS
+      .limit(3) 
 
     if (!error && data) {
       setArchivos(data)
@@ -37,10 +34,10 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
     setCargando(false)
   }
 
-  // Escuchamos el gatillo para recargar cuando se sube uno nuevo
+  // Se ejecuta solo al montar.
   useEffect(() => {
     cargarArchivos()
-  }, [refreshTrigger])
+  }, [])
 
   const handleEliminar = async (id: string, storagePath: string, fileName: string) => {
     if (!window.confirm(`¿Estás seguro de eliminar "${fileName}"?\n\nEsto borrará permanentemente el archivo y TODAS sus cotizaciones asociadas de la base de datos.`)) {
@@ -49,13 +46,11 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
 
     setMensaje(`Eliminando "${fileName}"...`)
 
-    // 1. Borramos físicamente del bucket Mk-tos
     const resStorage = await eliminarArchivoMkTos(storagePath);
     if (!resStorage.exito) {
       setMensaje(`⚠️ Error al borrar de Storage: ${resStorage.error}`);
     }
 
-    // 2. Borramos el registro (y por 'cascade', se borran sus cotizaciones)
     const { error } = await supabase.from('file_uploads').delete().eq('id', id);
 
     if (error) {
@@ -63,12 +58,12 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
     } else {
       setMensaje(`✅ Archivo eliminado correctamente.`);
       cargarArchivos(); 
-      if (onDatosActualizados) onDatosActualizados();
+      router.refresh(); // Forzamos la actualización de la tabla principal en el servidor
     }
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow mb-6 border border-gray-200">
+    <div className="bg-white p-6 rounded-lg shadow border border-gray-200 h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-gray-800">File history</h2>
         <button onClick={cargarArchivos} className="text-sm text-blue-600 hover:text-blue-800">
@@ -118,7 +113,6 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
                     {new Date(archivo.created_at).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-right space-x-3">
-                    {/* El botón Archivar irá acá a futuro */}
                     <button 
                       onClick={() => handleEliminar(archivo.id, archivo.storage_path, archivo.file_name)}
                       className="text-red-600 hover:text-red-900 transition-colors"
@@ -133,7 +127,6 @@ export default function HistorialArchivosMkTos({ onDatosActualizados, refreshTri
         </div>
       )}
       
-      {/* Mensaje sutil indicando que hay más historial oculto */}
       {!cargando && archivos.length === 3 && (
         <div className="text-xs text-gray-400 mt-3 text-right italic">
           Mostrando las 3 subidas más recientes.

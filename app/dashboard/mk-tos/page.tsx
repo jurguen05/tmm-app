@@ -1,44 +1,60 @@
-'use client'
-
-import { useState, useEffect } from 'react'
-import { supabase } from '../../../lib/supabase'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { connection } from 'next/server'
 import UploadMkTosCsv from '../../../components/UploadMkTosCsv'
 import HistorialArchivosMkTos from '../../../components/HistorialArchivosMkTos'
 import MkTosTable from '../../../components/MkTosTable'
 
-export default function MkTosPage() {
-  const [refreshHistorial, setRefreshHistorial] = useState(0)
-  const [quotes, setQuotes] = useState<any[]>([])
-  const [cargando, setCargando] = useState(true)
+export const instant = false
 
-  const recargarDatos = async () => {
-    setCargando(true)
-    // 1. Forzamos la actualización del historial visual
-    setRefreshHistorial(prev => prev + 1)
-    
-    // 2. Buscamos todas las cotizaciones de archivos NO archivados
-    const { data, error } = await supabase
-      .from('mk_tos_quotes')
-      .select(`
-        *,
-        file_uploads!inner(is_archived)
-      `)
-      .eq('file_uploads.is_archived', false)
-      .order('symbol', { ascending: true })
+interface Props {
+  searchParams: Promise<{
+    page?: string
+    pageSize?: string
+    symbol?: string
+  }>
+}
 
-    if (error) {
-      console.error('Error cargando cotizaciones:', error.message)
-    } else {
-      setQuotes(data || [])
+export default async function MkTosPage({ searchParams }: Props) {
+  await connection()
+  const params = await searchParams
+  const page = Math.max(1, parseInt(params?.page || '1', 10))
+  const pageSize = Math.max(10, Math.min(200, parseInt(params?.pageSize || '50', 10)))
+  const symbol = (params?.symbol || '').trim()
+
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+      },
     }
-    
-    setCargando(false)
+  )
+
+  // Fetching paginado con conteo exacto en el servidor
+  let query = supabase
+    .from('mk_tos_quotes')
+    .select('*, file_uploads!inner(is_archived)', { count: 'exact' })
+    .eq('file_uploads.is_archived', false)
+    .order('quote_date', { ascending: false })
+    .order('symbol', { ascending: true })
+
+  if (symbol) {
+    query = query.ilike('symbol', `%${symbol}%`)
   }
 
-  // Cargar la tabla al entrar a la página
-  useEffect(() => {
-    recargarDatos()
-  }, [])
+  const { data: quotes, count, error } = await query.range(from, to)
+
+  if (error) {
+    console.error('Error cargando cotizaciones:', error.message)
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -50,16 +66,18 @@ export default function MkTosPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <UploadMkTosCsv onDatosActualizados={recargarDatos} />
-        
-        <HistorialArchivosMkTos 
-          onDatosActualizados={recargarDatos} 
-          refreshTrigger={refreshHistorial} 
-        />
+        <UploadMkTosCsv />
+        <HistorialArchivosMkTos />
       </div>
 
-      {/* Renderizamos la Gran Tabla */}
-      <MkTosTable quotes={quotes} cargando={cargando} />
+      <MkTosTable 
+        quotes={quotes || []} 
+        totalCount={count || 0}
+        currentPage={page}
+        pageSize={pageSize}
+        symbolFilter={symbol}
+        cargando={false} 
+      />
     </div>
   )
 }

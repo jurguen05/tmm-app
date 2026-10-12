@@ -4,8 +4,9 @@ import { useState } from 'react'
 import Papa from 'papaparse'
 import { supabase } from '../lib/supabase'
 import { subirArchivoOriginal } from '../lib/storage'
+import { useRouter } from 'next/navigation'
+import { parsearFechaTOS } from '../lib/formatters'
 
-// AVISAMOS QUE ACEPTA ESTA FUNCIÓN COMO PROP
 interface UploadProps {
   onDatosActualizados?: () => void;
 }
@@ -13,21 +14,13 @@ interface UploadProps {
 export default function UploadTransactionsCsv({ onDatosActualizados }: UploadProps) {
   const [mensaje, setMensaje] = useState('')
   const [cargando, setCargando] = useState(false)
+  const router = useRouter()
 
   const normalizeNumber = (value: string | undefined | null) => {
     if (!value) return 0;
     const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
     const num = parseFloat(cleanStr);
     return isNaN(num) ? 0 : num;
-  };
-
-  const procesarFecha = (rawDate: string) => {
-    if (!rawDate) return null;
-    const matches = rawDate.match(/\d{2}\/\d{2}\/\d{4}/g);
-    if (!matches) return null;
-    const finalDate = matches[matches.length - 1];
-    const parts = finalDate.split('/');
-    return `${parts[2]}-${parts[0]}-${parts[1]}`; 
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,7 +51,7 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      let csvText = event.target?.result as string;
+      const csvText = event.target?.result as string;
       const lineas = csvText.split('\n');
       const lineasLimpias = lineas.map(linea => {
         let l = linea.trim();
@@ -78,7 +71,7 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
             const symbolOriginal = row['Symbol'];
             if (!symbolOriginal) continue;
 
-            let uniqueKey, symbol, instrument;
+            let uniqueKey, symbol, instrument: 'Stock' | 'Option';
             const optionMatch = symbolOriginal.match(/^([A-Z]+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+(\.\d+)?)\s+([CP])$/);
 
             if (optionMatch) {
@@ -96,10 +89,9 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
               instrument = 'Stock';
             }
 
-            const realDate = procesarFecha(row['Date']);
+            const realDate = parsearFechaTOS(row['Date']);
             if (!realDate) continue;
 
-            // ACÁ ESTÁ EL CAMBIO: Leemos directo la columna trade_code del Excel
             const rawCode = row['trade_code'];
             const parsedCode = rawCode ? parseInt(rawCode.toString().replace(/[^0-9.-]+/g, '')) : null;
 
@@ -115,7 +107,7 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
               price: normalizeNumber(row['Price']),
               fees: normalizeNumber(row['Fees & Comm']),
               amount: normalizeNumber(row['Amount']),
-              position_status: 'Open', 
+              position_status: 'Open' as const, 
               strategy: null,
               stock_entry_price: instrument === 'Stock' ? normalizeNumber(row['Price']) : null
             });
@@ -162,10 +154,10 @@ export default function UploadTransactionsCsv({ onDatosActualizados }: UploadPro
             } else {
               setMensaje(`✅ ¡Éxito! Archivo guardado y ${filasProcesadas.length} transacciones procesadas.`);
               e.target.value = '';
-              // LLAMAMOS A LA FUNCIÓN PARA QUE ACTUALICE LA TABLA SOLA
               if (onDatosActualizados) {
                 onDatosActualizados();
               }
+              router.refresh();
             }
           } else {
             setMensaje('No se encontraron datos válidos en el CSV.');
