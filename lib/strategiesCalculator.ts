@@ -190,13 +190,18 @@ export const consolidarStrategiesStops = (
       weekendTraderFlag
     );
 
-    const max_stock_price = (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
-      ? tradeFromMaster.max_stock_price
-      : maxCalc.max_stock_price;
+    const isTradeClosed = tradeFromMaster?.status === 'Closed';
+    const max_stock_price = isTradeClosed ? null : (
+      (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
+        ? tradeFromMaster.max_stock_price
+        : maxCalc.max_stock_price
+    );
 
-    const max_stock_price_date = (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
-      ? (tradeFromMaster.max_stock_price_date || maxCalc.max_stock_price_date)
-      : maxCalc.max_stock_price_date;
+    const max_stock_price_date = isTradeClosed ? null : (
+      (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
+        ? (tradeFromMaster.max_stock_price_date || maxCalc.max_stock_price_date)
+        : maxCalc.max_stock_price_date
+    );
 
     let stop: string | number = '-';
     let stopValue: number | null = null;

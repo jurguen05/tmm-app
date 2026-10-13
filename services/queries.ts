@@ -432,9 +432,15 @@ export async function updateTradeField(
   field: string,
   value: any
 ): Promise<void> {
+  const updates: Record<string, any> = { [field]: value };
+  if (field === 'status' && value === 'Closed') {
+    updates.max_stock_price = null;
+    updates.max_stock_price_date = null;
+  }
+
   const { error } = await supabase
     .from('trades')
-    .update({ [field]: value })
+    .update(updates)
     .eq('trade_code', tradeCode);
 
   if (error) throw new Error(error.message);
@@ -550,17 +556,24 @@ export async function syncTradesForCodes(
           first_buy_date: firstBuyDate,
           status: calculatedStatus,
           weekend_trader_flag: false,
+          max_stock_price: calculatedStatus === 'Closed' ? null : undefined,
+          max_stock_price_date: calculatedStatus === 'Closed' ? null : undefined,
           account_id: accountId
         });
       } else {
-        tradesToUpsert.push({
+        const updateObj: Partial<Trade> = {
           trade_code: code,
           symbol: existing.symbol || symbol,
           unique_key: existing.unique_key || uniqueKey,
           status: calculatedStatus,
           first_buy_date: existing.first_buy_date || firstBuyDate,
           stock_entry_price: existing.stock_entry_price ?? initialEntryPrice
-        });
+        };
+        if (calculatedStatus === 'Closed') {
+          updateObj.max_stock_price = null;
+          updateObj.max_stock_price_date = null;
+        }
+        tradesToUpsert.push(updateObj);
       }
 
       // Sincronizar las transacciones hijas para que coincidan con el status calculado
@@ -575,7 +588,7 @@ export async function syncTradesForCodes(
   }
 }
 
-// 29. Actualizar max_stock_price y max_stock_price_date para una lista de trades
+// 29. Actualizar max_stock_price y max_stock_price_date para una lista de trades (exclusivamente si status es 'Open')
 export async function updateTradesMaxStockPrices(
   supabase: SupabaseClient,
   items: { trade_code: number; max_stock_price: number | null; max_stock_price_date: string | null }[]
@@ -589,7 +602,8 @@ export async function updateTradesMaxStockPrices(
           max_stock_price: item.max_stock_price,
           max_stock_price_date: item.max_stock_price_date
         })
-        .eq('trade_code', item.trade_code);
+        .eq('trade_code', item.trade_code)
+        .eq('status', 'Open');
     } catch {
       // Fallback seguro si la columna aún no está creada en DB
     }

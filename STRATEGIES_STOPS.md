@@ -51,9 +51,10 @@ This document centralizes the business logic, formulas, and data sources used to
    - Preserves the date on which the highest price was recorded (`max_stock_price_date`).
    - If the trade already has a previously persisted `max_stock_price` in the `trades` table that exceeds current quotes, the stored historical high is kept intact.
 
-2. **Persistence & MK-TOS Archiving:**
-   - Both `max_stock_price` and `max_stock_price_date` are autocalculated and stored in the `trades` table.
-   - **Purpose:** Allows older MK-TOS quote CSV files outside the active trade period to be safely archived in the future without losing the peak price reference needed for trailing stop calculations.
+2. **Persistence, Archiving & Closed Lifecycle Rule:**
+   - Both `max_stock_price` and `max_stock_price_date` are autocalculated and stored in the `trades` table **exclusively while the trade is `Open`**.
+   - **Trade Closure Rule:** As soon as a trade is marked as `Closed` (via Option 1 net quantity balance $= 0$, or via Option 2 manual confirmation), both `max_stock_price` and `max_stock_price_date` are automatically reset to `NULL`.
+   - **Purpose:** Allows older MK-TOS quote CSV files outside the active trade period to be safely archived without losing the peak price reference needed for trailing stop calculations while the position is active.
 
 ---
 
@@ -71,8 +72,9 @@ This document centralizes the business logic, formulas, and data sources used to
    - If `first_buy_date` is a Friday, `stock_entry_price` is considered as the initial candidate. If `first_buy_date` was not a Friday, only subsequent Friday quotes are evaluated.
    - Non-Friday quotes (Monday through Thursday) are strictly ignored for this strategy's peak calculation.
 
-2. **Persistence & Archiving:**
-   - Automatically persisted to `trades.max_stock_price` and `trades.max_stock_price_date`.
+2. **Persistence, Archiving & Closed Lifecycle Rule:**
+   - Automatically persisted to `trades.max_stock_price` and `trades.max_stock_price_date` exclusively while `status = 'Open'`.
+   - When the trade transitions to `Closed`, both fields are automatically set to `NULL`.
    - Protects stop reference points against future MK-TOS CSV archiving.
 
 ---

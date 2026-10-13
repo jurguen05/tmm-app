@@ -1,9 +1,9 @@
 -- ==============================================================================
--- Migration: Backfill Max Stock Price & Date exclusively for:
+-- Migration: Backfill Max Stock Price & Date exclusively for OPEN trades:
 --   1. '20% Flipper' (highest last_price on all market days since first_buy_date)
 --   2. 'Weekend Trader' (highest last_price EXCLUSIVELY on Fridays since first_buy_date)
 --
--- All other strategies remain NULL.
+-- Rule: When a trade is Closed, max_stock_price and max_stock_price_date MUST BE NULL.
 -- File: supabase/migrations/20261013_backfill_max_stock_price.sql
 -- ==============================================================================
 
@@ -14,20 +14,35 @@ ADD COLUMN IF NOT EXISTS max_stock_price_date DATE;
 
 CREATE INDEX IF NOT EXISTS idx_trades_max_stock_price_date ON trades(max_stock_price_date);
 
--- 2. Clear any values for other strategies (guarantees ONLY 20% Flipper and Weekend Trader have values)
+-- 2. Trigger en DB para forzar que cualquier trade 'Closed' tenga siempre max_stock_price = NULL y max_stock_price_date = NULL
+CREATE OR REPLACE FUNCTION clean_closed_trade_max_prices()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.status = 'Closed' THEN
+    NEW.max_stock_price := NULL;
+    NEW.max_stock_price_date := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_clean_closed_trade_max_prices ON trades;
+CREATE TRIGGER trg_clean_closed_trade_max_prices
+BEFORE INSERT OR UPDATE OF status, max_stock_price, max_stock_price_date
+ON trades
+FOR EACH ROW
+EXECUTE FUNCTION clean_closed_trade_max_prices();
+
+-- 3. Limpiar valores para trades que ya estén 'Closed' o pertenezcan a otras estrategias
 UPDATE trades t
 SET 
   max_stock_price = NULL,
   max_stock_price_date = NULL
 FROM strategies s
-WHERE t.strategy_id = s.id
-  AND NOT (
-    s.name ILIKE '%flipper%' 
-    OR s.name ILIKE '%weekend%' 
-    OR t.weekend_trader_flag = true
-  );
+WHERE (t.strategy_id = s.id AND NOT (s.name ILIKE '%flipper%' OR s.name ILIKE '%weekend%' OR t.weekend_trader_flag = true))
+   OR t.status = 'Closed';
 
--- 3. Backfill para 20% Flipper desde cotizaciones de MK-TOS
+-- 4. Poblado para 20% Flipper (EXCLUSIVAMENTE trades Open)
 WITH quotes_flipper AS (
   SELECT 
     t.trade_code,
@@ -42,6 +57,7 @@ WITH quotes_flipper AS (
   JOIN mk_tos_quotes q ON q.symbol = t.symbol
   JOIN file_uploads fu ON q.file_upload_id = fu.id
   WHERE fu.is_archived = false
+    AND t.status = 'Open'
     AND (s.name ILIKE '%flipper%' OR s.name ILIKE '%20%')
     AND q.quote_date >= COALESCE(t.first_buy_date, '1970-01-01')
 )
@@ -51,21 +67,23 @@ SET
   max_stock_price_date = qf.quote_date
 FROM quotes_flipper qf
 WHERE t.trade_code = qf.trade_code
+  AND t.status = 'Open'
   AND qf.rn = 1;
 
--- 3b. 20% Flipper: Si el precio de entrada inicial (stock_entry_price) fue superior a todas las cotizaciones posteriores
+-- 4b. 20% Flipper: Si el precio de entrada inicial (stock_entry_price) fue el más alto (solo Open)
 UPDATE trades t
 SET 
   max_stock_price = t.stock_entry_price,
   max_stock_price_date = t.first_buy_date
 FROM strategies s
 WHERE t.strategy_id = s.id
+  AND t.status = 'Open'
   AND (s.name ILIKE '%flipper%' OR s.name ILIKE '%20%')
   AND t.stock_entry_price IS NOT NULL 
   AND t.stock_entry_price > 0
   AND (t.max_stock_price IS NULL OR t.stock_entry_price > t.max_stock_price);
 
--- 4. Backfill para Weekend Trader (evaluando EXCLUSIVAMENTE cotizaciones en día viernes: DOW = 5)
+-- 5. Poblado para Weekend Trader (EXCLUSIVAMENTE trades Open y cotizaciones en viernes)
 WITH quotes_weekend AS (
   SELECT 
     t.trade_code,
@@ -80,6 +98,7 @@ WITH quotes_weekend AS (
   JOIN mk_tos_quotes q ON q.symbol = t.symbol
   JOIN file_uploads fu ON q.file_upload_id = fu.id
   WHERE fu.is_archived = false
+    AND t.status = 'Open'
     AND (s.name ILIKE '%weekend%' OR t.weekend_trader_flag = true)
     AND EXTRACT(DOW FROM q.quote_date) = 5
     AND q.quote_date >= COALESCE(t.first_buy_date, '1970-01-01')
@@ -90,15 +109,17 @@ SET
   max_stock_price_date = qw.quote_date
 FROM quotes_weekend qw
 WHERE t.trade_code = qw.trade_code
+  AND t.status = 'Open'
   AND qw.rn = 1;
 
--- 4b. Weekend Trader: Si first_buy_date cayó en día viernes y stock_entry_price fue superior
+-- 5b. Weekend Trader: Si first_buy_date cayó en viernes y stock_entry_price fue el más alto (solo Open)
 UPDATE trades t
 SET 
   max_stock_price = t.stock_entry_price,
   max_stock_price_date = t.first_buy_date
 FROM strategies s
 WHERE ((t.strategy_id = s.id AND s.name ILIKE '%weekend%') OR t.weekend_trader_flag = true)
+  AND t.status = 'Open'
   AND t.first_buy_date IS NOT NULL
   AND EXTRACT(DOW FROM t.first_buy_date) = 5
   AND t.stock_entry_price IS NOT NULL 
