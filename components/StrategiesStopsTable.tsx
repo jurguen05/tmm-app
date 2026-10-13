@@ -6,6 +6,7 @@ import PaginationControls from './PaginationControls'
 import { ConsolidatedStrategyStop, Trade } from '../types'
 import { updateTradeField } from '../services/queries'
 import { supabase } from '../lib/supabase'
+import { formatearFecha } from '../lib/formatters'
 
 interface TableProps {
   datos: ConsolidatedStrategyStop[];
@@ -224,6 +225,8 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
                 <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Strategy</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Stock Entry Price</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Last</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Max Price</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Max Date</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Stop</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Rentabilidad</th>
               </tr>
@@ -231,7 +234,7 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
             <tbody className="bg-white divide-y divide-gray-200">
               {datosFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     No positions match the applied filters.
                   </td>
                 </tr>
@@ -256,6 +259,12 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
                       </td>
                       <td className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{formatoMoneda(fila.entryPrice)}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">{formatoMoneda(fila.lastPrice)}</td>
+                      <td className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">
+                        {fila.max_stock_price ? formatoMoneda(fila.max_stock_price) : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
+                        {fila.max_stock_price_date ? formatearFecha(fila.max_stock_price_date) : '-'}
+                      </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {isReview ? (
                           <span 
@@ -340,10 +349,42 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
                 </div>
               </div>
 
+              {/* 20% Flipper Card */}
+              <div className="p-4 rounded-lg border border-purple-200 bg-purple-50/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-purple-900">20% Flipper</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-semibold">Active Peak Tracking</span>
+                </div>
+                <div className="text-xs text-gray-700 space-y-1.5">
+                  <p>
+                    <strong>Max Stock Price & Date:</strong> Tracks the highest <code className="bg-white px-1.5 py-0.5 rounded border border-purple-200 text-purple-800">Last Price</code> recorded across all historical quotes and active sessions from <code className="bg-white px-1.5 py-0.5 rounded border border-purple-200 text-purple-800">first_buy_date</code> to present.
+                  </p>
+                  <p className="text-purple-800 bg-purple-50 p-2 rounded border border-purple-200 font-medium">
+                    📌 <strong>Peak Reference:</strong> Persisted in the <code className="bg-white px-1 rounded">trades</code> master table so historical MK-TOS files outside the active trade window can later be archived safely.
+                  </p>
+                </div>
+              </div>
+
+              {/* Weekend Trader Card */}
+              <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-emerald-900">Weekend Trader</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">Active Peak Tracking (Fridays Only)</span>
+                </div>
+                <div className="text-xs text-gray-700 space-y-1.5">
+                  <p>
+                    <strong>Max Stock Price & Date:</strong> Tracks the highest <code className="bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-800">Last Price</code> recorded from <code className="bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-800">first_buy_date</code> to present, evaluating <strong>EXCLUSIVELY Friday sessions</strong>.
+                  </p>
+                  <p className="text-emerald-800 bg-emerald-50 p-2 rounded border border-emerald-200 font-medium">
+                    📅 <strong>Friday Rule:</strong> Non-Friday quotes are ignored for peak price evaluation. Persisted in the <code className="bg-white px-1 rounded">trades</code> master table.
+                  </p>
+                </div>
+              </div>
+
               {/* Informative Note for Upcoming Strategies */}
               <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-500">
                 <p className="font-semibold text-gray-700 mb-1">Upcoming Strategies:</p>
-                <p>The rules for Hedge, 100-day-High, 20%-Flipper, BBO, New Yearly Highs, MACD, Weekend Trader, and Trend Pilot will appear here as we integrate them.</p>
+                <p>The rules for Hedge, 100-day-High, BBO, New Yearly Highs, MACD, and Trend Pilot will appear here as we integrate them.</p>
               </div>
             </div>
 

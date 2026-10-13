@@ -1,9 +1,78 @@
 // lib/strategiesCalculator.ts
 
 import { Position, Transaction, MkTosQuote, ConsolidatedStrategyStop, Trade } from '../types';
-import { normalizeUniqueKey } from './formatters';
+import { normalizeUniqueKey, esViernes } from './formatters';
 
 export type { ConsolidatedStrategyStop };
+
+export interface MaxStockPriceResult {
+  max_stock_price: number | null;
+  max_stock_price_date: string | null;
+}
+
+/**
+ * Calcula el precio máximo alcanzado por la acción y su fecha según las reglas de cada estrategia:
+ * - '20% Flipper': El last más alto desde first_buy_date hasta hoy (evaluando todos los días hábiles).
+ * - 'Weekend Trader': El last más alto desde first_buy_date hasta hoy, evaluando EXCLUSIVAMENTE los días viernes.
+ * - Demás estrategias: No aplica (retorna null).
+ */
+export const calcularMaxStockPriceYFecha = (
+  strategy: string,
+  firstBuyDate: string | null,
+  stockEntryPrice: number | null,
+  quotesDelSimbolo: MkTosQuote[],
+  currentStockLast?: number | null,
+  currentDate?: string | null,
+  weekendTraderFlag?: boolean
+): MaxStockPriceResult => {
+  const norm = (strategy || '').toLowerCase().replace(/[\s-_%]+/g, '');
+  const is20Flipper = norm.includes('20flipper') || norm.includes('flipper');
+  const isWeekendTrader = norm.includes('weekend') || weekendTraderFlag === true;
+
+  if (!is20Flipper && !isWeekendTrader) {
+    return { max_stock_price: null, max_stock_price_date: null };
+  }
+
+  let highestPrice = stockEntryPrice && stockEntryPrice > 0 ? stockEntryPrice : 0;
+  let highestDate = firstBuyDate || null;
+
+  // Si es Weekend Trader y firstBuyDate no cayó en día viernes, no arranca con esa fecha como pico
+  if (isWeekendTrader && firstBuyDate && !esViernes(firstBuyDate)) {
+    highestPrice = 0;
+    highestDate = null;
+  }
+
+  const minDate = firstBuyDate || '1970-01-01';
+  const relevantQuotes = quotesDelSimbolo.filter(q => q.quote_date && q.quote_date >= minDate);
+
+  for (const q of relevantQuotes) {
+    const qDate = q.quote_date;
+    // En Weekend Trader, evaluamos única y exclusivamente cotizaciones correspondientes a días viernes
+    if (isWeekendTrader && !esViernes(qDate)) {
+      continue;
+    }
+
+    const p = q.last_price || 0;
+    if (p > highestPrice) {
+      highestPrice = p;
+      highestDate = qDate;
+    }
+  }
+
+  // Evaluar también el precio actual de la posición (si corresponde a hoy o sesión activa)
+  if (currentStockLast && currentStockLast > 0 && currentDate) {
+    const isEligibleToday = is20Flipper || (isWeekendTrader && esViernes(currentDate));
+    if (isEligibleToday && currentStockLast > highestPrice) {
+      highestPrice = currentStockLast;
+      highestDate = currentDate;
+    }
+  }
+
+  return {
+    max_stock_price: highestPrice > 0 ? highestPrice : null,
+    max_stock_price_date: highestDate
+  };
+};
 
 /**
  * Función pura de dominio que consolida las posiciones activas con su historial de transacciones,
@@ -20,6 +89,7 @@ export const consolidarStrategiesStops = (
 
   // Indexar las cotizaciones de MK-TOS por símbolo (quedándonos con la más reciente si hay varias)
   const quotesBySymbol = new Map<string, MkTosQuote>();
+  const allQuotesBySymbol = new Map<string, MkTosQuote[]>();
   if (mkTosQuotes && mkTosQuotes.length > 0) {
     for (const q of mkTosQuotes) {
       if (!q.symbol) continue;
@@ -27,6 +97,10 @@ export const consolidarStrategiesStops = (
       if (!quotesBySymbol.has(sym)) {
         quotesBySymbol.set(sym, q);
       }
+      if (!allQuotesBySymbol.has(sym)) {
+        allQuotesBySymbol.set(sym, []);
+      }
+      allQuotesBySymbol.get(sym)!.push(q);
     }
   }
 
@@ -101,8 +175,28 @@ export const consolidarStrategiesStops = (
     const quote = quotesBySymbol.get(symKey);
 
     // Identificación de estrategia
-    const normStrategy = finalStrategy.toLowerCase().replace(/[\s-_]+/g, '');
+    const normStrategy = finalStrategy.toLowerCase().replace(/[\s-_%]+/g, '');
     const isTechTrader = normStrategy === 'techtrader' || normStrategy === 'techtrade';
+
+    // Calcular max_stock_price y max_stock_price_date para 20% Flipper y Weekend Trader
+    const quotesHistDelSimbolo = allQuotesBySymbol.get(symKey) || [];
+    const maxCalc = calcularMaxStockPriceYFecha(
+      finalStrategy,
+      firstBuyDate,
+      finalEntryPrice,
+      quotesHistDelSimbolo,
+      lastPrice,
+      pos.statement_date,
+      weekendTraderFlag
+    );
+
+    const max_stock_price = (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
+      ? tradeFromMaster.max_stock_price
+      : maxCalc.max_stock_price;
+
+    const max_stock_price_date = (tradeFromMaster?.max_stock_price && tradeFromMaster.max_stock_price > (maxCalc.max_stock_price || 0))
+      ? (tradeFromMaster.max_stock_price_date || maxCalc.max_stock_price_date)
+      : maxCalc.max_stock_price_date;
 
     let stop: string | number = '-';
     let stopValue: number | null = null;
@@ -140,6 +234,8 @@ export const consolidarStrategiesStops = (
       lastPrice: lastPrice,
       first_buy_date: firstBuyDate,
       weekend_trader_flag: weekendTraderFlag,
+      max_stock_price: max_stock_price,
+      max_stock_price_date: max_stock_price_date,
       stop: stop,
       stopValue: stopValue,
       needsReview: needsReview,

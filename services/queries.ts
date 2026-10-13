@@ -575,3 +575,25 @@ export async function syncTradesForCodes(
   }
 }
 
+// 29. Actualizar max_stock_price y max_stock_price_date para una lista de trades
+export async function updateTradesMaxStockPrices(
+  supabase: SupabaseClient,
+  items: { trade_code: number; max_stock_price: number | null; max_stock_price_date: string | null }[]
+): Promise<void> {
+  if (!items || items.length === 0) return;
+  for (const item of items) {
+    try {
+      await supabase
+        .from('trades')
+        .update({
+          max_stock_price: item.max_stock_price,
+          max_stock_price_date: item.max_stock_price_date
+        })
+        .eq('trade_code', item.trade_code);
+    } catch {
+      // Fallback seguro si la columna aún no está creada en DB
+    }
+  }
+}
+
+

@@ -109,3 +109,18 @@ export const normalizeUniqueKey = (key: string | null | undefined): string => {
   }
   return clean.toUpperCase();
 };
+
+/**
+ * Determina si una fecha en formato ISO "YYYY-MM-DD" corresponde a un día viernes.
+ * Utiliza fecha UTC para evitar desfasajes horarios de zona.
+ */
+export const esViernes = (fechaISO: string | null | undefined): boolean => {
+  if (!fechaISO) return false;
+  const match = fechaISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10) - 1;
+  const d = parseInt(match[3], 10);
+  const dt = new Date(Date.UTC(y, m, d));
+  return dt.getUTCDay() === 5; // 5 = Viernes (0 = Domingo)
+};

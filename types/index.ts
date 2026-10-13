@@ -47,6 +47,8 @@ export interface Trade {
   first_buy_date: string | null;
   status: 'Open' | 'Closed';
   weekend_trader_flag: boolean;
+  max_stock_price?: number | null;
+  max_stock_price_date?: string | null;
   account_id?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -114,6 +116,8 @@ export interface ConsolidatedStrategyStop {
   lastPrice: number;
   first_buy_date?: string | null;
   weekend_trader_flag?: boolean;
+  max_stock_price?: number | null;
+  max_stock_price_date?: string | null;
   stop: string | number;
   stopValue?: number | null;
   needsReview?: boolean;

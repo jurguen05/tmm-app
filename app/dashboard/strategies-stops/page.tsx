@@ -2,7 +2,14 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import StrategiesStopsTable from '../../../components/StrategiesStopsTable'
-import { getPositions, getTransactionsByUniqueKeys, getLatestMkTosQuotes, getTransactionsByTradeCodes, getOpenTrades } from '../../../services/queries'
+import { 
+  getPositions, 
+  getTransactionsByUniqueKeys, 
+  getLatestMkTosQuotes, 
+  getTransactionsByTradeCodes, 
+  getOpenTrades,
+  updateTradesMaxStockPrices 
+} from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 
 export const instant = false
@@ -70,6 +77,19 @@ export default async function StrategiesStopsPage() {
     }
 
     consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades)
+
+    // Persistir max_stock_price y max_stock_price_date calculados en la tabla trades
+    const tradesWithMax = consolidado
+      .filter(c => c.trade_code && c.trade_code !== '-' && c.max_stock_price !== null && c.max_stock_price !== undefined)
+      .map(c => ({
+        trade_code: Number(c.trade_code),
+        max_stock_price: c.max_stock_price ?? null,
+        max_stock_price_date: c.max_stock_price_date ?? null
+      }));
+
+    if (tradesWithMax.length > 0) {
+      await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {});
+    }
 
     // Detectar trades marcados como 'Open' pero ausentes en el Position Statement de hoy (Opción 2 con aviso)
     const activeConsolidatedCodes = new Set(
