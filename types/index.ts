@@ -33,6 +33,23 @@ export interface Transaction {
   file_upload_id?: string;
   account_id?: string;
   description?: string | null;
+  trade?: Trade | null;
+}
+
+export interface Trade {
+  id: string;
+  trade_code: number;
+  symbol: string;
+  unique_key: string;
+  strategy_id: number | null;
+  strategies?: { name: string } | null;
+  stock_entry_price: number | null;
+  first_buy_date: string | null;
+  status: 'Open' | 'Closed';
+  weekend_trader_flag: boolean;
+  account_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Strategy {
@@ -92,8 +109,13 @@ export interface ConsolidatedStrategyStop {
   trade_code: string;
   symbol: string;
   strategy: string;
+  strategy_id?: number | null;
   entryPrice: number;
   lastPrice: number;
+  first_buy_date?: string | null;
+  weekend_trader_flag?: boolean;
   stop: string | number;
+  stopValue?: number | null;
+  needsReview?: boolean;
   rentabilidad: number;
 }

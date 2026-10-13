@@ -41,14 +41,19 @@ export const procesarFilasTransacciones = (
     let symbol = '';
     let instrument: 'Stock' | 'Option' = 'Stock';
 
-    // Formato de opciones de ThinkorSwim: "TICKER DD/MM/YYYY STRIKE C|P" o "TICKER MM/DD/YYYY STRIKE C|P"
-    const optionMatch = symbolOriginal.match(/^([A-Z]+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+(\.\d+)?)\s+([CP])$/);
+    // Formato de opciones de ThinkorSwim: "TICKER MM/DD/YYYY STRIKE C|P" o "TICKER DD/MM/YYYY STRIKE C|P"
+    const optionMatch = symbolOriginal.match(/^([A-Z]+)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d+(\.\d+)?)\s+([CP])$/);
 
     if (optionMatch) {
       const ticker = optionMatch[1];
       const parts = optionMatch[2].split('/');
-      // Invertir DD/MM a MM/DD para estandarizar la clave única si es necesario
-      const expiry = `${parts[1]}/${parts[0]}/${parts[2]}`;
+      let mm = parts[0].padStart(2, '0');
+      let dd = parts[1].padStart(2, '0');
+      if (parseInt(parts[0], 10) > 12 && parseInt(parts[1], 10) <= 12) {
+        dd = parts[0].padStart(2, '0');
+        mm = parts[1].padStart(2, '0');
+      }
+      const expiry = `${mm}/${dd}/${parts[2]}`;
       const strike = parseFloat(optionMatch[3]);
       const type = optionMatch[5];
       uniqueKey = `${ticker}-${expiry} ${strike} ${type}`;
@@ -129,4 +134,49 @@ export const limpiarTextoCsv = (csvText: string): string => {
 export const extraerAccountIdDesdeNombre = (fileName: string, fallback = 'DESCONOCIDO'): string => {
   const matchAccount = fileName.match(/([A-Z]{3}\d{3})/i);
   return matchAccount ? matchAccount[1].toUpperCase() : fallback;
+};
+
+/**
+ * Calcula el estado de un trade ('Open' o 'Closed') a partir del balance neto de sus transacciones (Opción 1).
+ * Si la cantidad neta de acciones u opciones remanentes es 0, el trade está 'Closed'.
+ * Si aún queda posición abierta en acciones u opciones, el trade permanece 'Open'.
+ */
+export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Open' | 'Closed' => {
+  if (!transacciones || transacciones.length === 0) return 'Closed';
+
+  let netStock = 0;
+  let hasStock = false;
+  let netOption = 0;
+  let hasOption = false;
+
+  for (const t of transacciones) {
+    const act = (t.action || '').trim().toLowerCase();
+    const qty = Math.abs(t.quantity || 0);
+
+    const isBuy = act.includes('buy') || act.includes('bot') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
+    const isSell = act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+
+    const delta = isBuy ? qty : (isSell ? -qty : 0);
+
+    if (t.instrument === 'Option') {
+      hasOption = true;
+      netOption += delta;
+    } else {
+      hasStock = true;
+      netStock += delta;
+    }
+  }
+
+  // Si tiene posición en acciones y el balance no es cero -> sigue Abierto
+  if (hasStock && Math.abs(netStock) > 0.0001) {
+    return 'Open';
+  }
+
+  // Si tiene posición en opciones y el balance no es cero -> sigue Abierto
+  if (hasOption && Math.abs(netOption) > 0.0001) {
+    return 'Open';
+  }
+
+  // Si no queda posición remanente en ningún instrumento -> Cerrado
+  return 'Closed';
 };

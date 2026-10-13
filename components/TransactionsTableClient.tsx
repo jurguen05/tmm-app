@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { updateTransactionField, deleteTransactions } from '../services/queries'
+import { updateTransactionField, deleteTransactions, updateTradeField, updateTransactionsByTradeCode } from '../services/queries'
 import { Transaction, Strategy } from '../types'
 import TransactionsTable from './TransactionsTable'
 import PaginationControls from './PaginationControls'
@@ -33,13 +33,53 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   }
 
   const actualizarTransaccion = async (id: string, campo: string, valor: any) => {
-    // Optimistic UI update
-    setTransacciones(prev => prev.map(t => t.id === id ? { ...t, [campo]: valor } : t))
+    const tx = transacciones.find(t => t.id === id)
+    if (!tx) return;
+
+    const codeNum = tx.trade_code ? Number(tx.trade_code) : null;
+    const est = campo === 'strategy_id' ? estrategias.find(e => e.id === valor) : null;
+
+    // Optimistic UI update: Si tiene trade_code, actualizar todas las filas de ese trade en pantalla
+    setTransacciones(prev => prev.map(t => {
+      const matchTrade = codeNum && t.trade_code && Number(t.trade_code) === codeNum;
+      if (matchTrade) {
+        if (campo === 'strategy_id') {
+          return {
+            ...t,
+            strategy_id: valor,
+            strategies: est ? { name: est.name } : null,
+            strategy: est ? est.name : null
+          };
+        }
+        if (campo === 'position_status') {
+          return { ...t, position_status: valor };
+        }
+        if (campo === 'stock_entry_price') {
+          return { ...t, stock_entry_price: valor };
+        }
+      }
+      return t.id === id ? { ...t, [campo]: valor } : t;
+    }));
+
     try {
-      await updateTransactionField(supabase, id, campo, valor)
-      router.refresh() // Avisar al server que los datos cambiaron
+      if (codeNum && !isNaN(codeNum) && codeNum > 0) {
+        // 1. Actualizar la tabla maestra trades
+        if (campo === 'strategy_id') {
+          await updateTradeField(supabase, codeNum, 'strategy_id', valor);
+        } else if (campo === 'stock_entry_price') {
+          await updateTradeField(supabase, codeNum, 'stock_entry_price', valor);
+        } else if (campo === 'position_status') {
+          await updateTradeField(supabase, codeNum, 'status', valor);
+        }
+
+        // 2. Actualizar las transacciones hijas para consistencia
+        await updateTransactionsByTradeCode(supabase, codeNum, campo, valor).catch(() => {});
+      } else {
+        await updateTransactionField(supabase, id, campo, valor);
+      }
+      router.refresh();
     } catch (error: any) {
-      alert('Hubo un error al guardar el cambio: ' + error.message)
+      alert('Hubo un error al guardar el cambio: ' + error.message);
     }
   }
 
@@ -107,46 +147,46 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
       <div className="bg-white p-4 rounded-lg shadow mb-6 border border-gray-200 flex flex-wrap items-end gap-4 justify-between">
         <div className="flex flex-wrap gap-4 flex-1 items-end">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Buscar Código</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Code</label>
             <input 
               type="text" 
-              placeholder="Ej: 42" 
+              placeholder="e.g. 42" 
               value={filtros.trade_code} 
               onChange={(e) => handleFiltroChange({...filtros, trade_code: e.target.value})} 
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-28" 
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Buscar Símbolo</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Symbol</label>
             <input 
               type="text" 
-              placeholder="Ej: AAPL" 
+              placeholder="e.g. AAPL" 
               value={filtros.symbol} 
               onChange={(e) => handleFiltroChange({...filtros, symbol: e.target.value})} 
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-32" 
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Estrategia</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Strategy</label>
             <select 
               value={filtros.strategy} 
               onChange={(e) => handleFiltroChange({...filtros, strategy: e.target.value})} 
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 bg-white w-40"
             >
-              <option value="">Todas</option>
+              <option value="">All</option>
               {estrategias.map(est => (
                 <option key={est.id} value={est.name}>{est.name}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Estado</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
             <select 
               value={filtros.status} 
               onChange={(e) => handleFiltroChange({...filtros, status: e.target.value})} 
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 bg-white"
             >
-              <option value="">Todos</option>
+              <option value="">All</option>
               <option value="open">Open</option>
               <option value="closed">Closed</option>
             </select>
@@ -155,9 +195,9 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
           {hayFiltrosActivos && (
             <button
               onClick={() => handleFiltroChange({ trade_code: '', symbol: '', strategy: '', status: '' })}
-              className="text-xs text-gray-500 hover:text-indigo-600 underline py-2"
+              className="text-xs text-gray-500 hover:text-indigo-600 underline py-2 cursor-pointer"
             >
-              Limpiar filtros
+              Clear filters
             </button>
           )}
         </div>
@@ -166,12 +206,12 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
           <div className="flex items-center gap-2">
             <button 
               onClick={() => setSelectedIds([])}
-              className="text-xs text-gray-500 hover:text-gray-700 underline"
+              className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer"
             >
-              Deseleccionar
+              Deselect
             </button>
-            <button onClick={borrarSeleccionadas} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-md text-sm font-semibold hover:bg-red-100 transition-colors">
-              Borrar {selectedIds.length} seleccionada/s
+            <button onClick={borrarSeleccionadas} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-md text-sm font-semibold hover:bg-red-100 transition-colors cursor-pointer">
+              Delete selected ({selectedIds.length})
             </button>
           </div>
         )}

@@ -83,3 +83,29 @@ export const formatearFecha = (fechaTexto: string | null | undefined): string =>
 export const fechaSegura = (fechaTexto: string | null | undefined): string => {
   return formatearFecha(fechaTexto);
 };
+
+/**
+ * Normaliza la clave única (unique_key) para opciones de modo que coincidan
+ * independientemente de si la fecha de expiración se almacenó como MM/DD/YYYY o DD/MM/YYYY.
+ */
+export const normalizeUniqueKey = (key: string | null | undefined): string => {
+  if (!key) return '';
+  const clean = key.trim();
+  const match = clean.match(/^([A-Z]+)-(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/);
+  if (match) {
+    const ticker = match[1];
+    const p1 = parseInt(match[2], 10);
+    const p2 = parseInt(match[3], 10);
+    const yyyy = match[4];
+    const rest = match[5];
+    let mm = match[2].padStart(2, '0');
+    let dd = match[3].padStart(2, '0');
+    if (p1 > 12 && p2 <= 12) {
+      // p1 es día (ej: 15/01/2027) -> normalizar a MM/DD/YYYY
+      dd = match[2].padStart(2, '0');
+      mm = match[3].padStart(2, '0');
+    }
+    return `${ticker}-${mm}/${dd}/${yyyy} ${rest}`.toUpperCase();
+  }
+  return clean.toUpperCase();
+};

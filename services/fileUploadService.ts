@@ -23,7 +23,8 @@ import {
   insertMkTosQuotes,
   deletePositionsByFileUploadId,
   deleteTransactionsByFileUploadId,
-  deleteMkTosQuotesByFileUploadId
+  deleteMkTosQuotesByFileUploadId,
+  syncTradesForCodes
 } from './queries';
 import { procesarFilasPosiciones } from '../lib/positionsParser';
 import { procesarFilasTransacciones, limpiarTextoCsv, extraerAccountIdDesdeNombre } from '../lib/transactionsParser';
@@ -237,6 +238,15 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
           // 3. Insertar transacciones asociadas
           const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
           await insertTransactions(supabase, filasConArchivo);
+
+          // 4. Sincronizar tabla trades automáticamente
+          const tradeCodes = filasConArchivo
+            .map(f => f.trade_code)
+            .filter((c): c is number => c !== null && c !== undefined && !isNaN(c));
+
+          if (tradeCodes.length > 0) {
+            await syncTradesForCodes(supabase, tradeCodes, accountId);
+          }
 
           resolve({
             success: true,
@@ -461,8 +471,26 @@ export async function deleteUploadedFileCompletely(fileRecord: FileUpload, supab
   const { id, storage_path, module } = fileRecord;
 
   if (module === 'transactions') {
+    // 1. Identificar trade_codes afectados antes de borrar
+    const { data: affectedTxs } = await supabase
+      .from('transactions')
+      .select('trade_code')
+      .eq('file_upload_id', id);
+
+    const affectedCodes: number[] = Array.from(new Set(
+      (affectedTxs || [])
+        .map((t: any) => Number(t.trade_code))
+        .filter((c: number) => !isNaN(c) && c > 0)
+    ));
+
+    // 2. Borrar transacciones del archivo y archivo en Storage
     await deleteTransactionsByFileUploadId(supabase, id).catch(() => {});
     await eliminarArchivoStorage(storage_path).catch(() => {});
+
+    // 3. Rollback automático: recalcular balance neto (Opción 1) de los trades restantes
+    if (affectedCodes.length > 0) {
+      await syncTradesForCodes(supabase, affectedCodes);
+    }
   } else if (module === 'positions') {
     await deletePositionsByFileUploadId(supabase, id).catch(() => {});
     await eliminarArchivoPositions(storage_path).catch(() => {});

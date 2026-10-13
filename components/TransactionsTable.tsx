@@ -102,28 +102,26 @@ export default function TransactionsTable({
                 
                 {/* Stock Entry Price */}
                 <td className={tdRight}>
-                  {t.instrument === 'Option' ? (
-                    editingPriceId === t.id ? (
-                      <input 
-                        type="number" 
-                        autoFocus
-                        onBlur={() => setEditingPriceId(null)}
-                        value={t.stock_entry_price || ''} 
-                        onChange={(e) => onActualizarTransaccion(t.id, 'stock_entry_price', parseFloat(e.target.value) || null)} 
-                        placeholder="0.00" 
-                        className="w-20 px-2 py-1 border border-indigo-500 rounded text-sm font-normal focus:outline-none focus:ring-1 focus:ring-indigo-500 text-right" 
-                      />
-                    ) : (
-                      <div 
-                        onClick={() => setEditingPriceId(t.id)} 
-                        className="cursor-text w-full px-2 py-1 border border-transparent hover:bg-gray-100 hover:border-gray-300 rounded text-sm transition-all"
-                        title="Hacé clic para editar"
-                      >
-                        {t.stock_entry_price ? formatearMoneda(t.stock_entry_price) : <span className="text-gray-400">0,00</span>}
-                      </div>
-                    )
+                  {editingPriceId === t.id ? (
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      autoFocus
+                      onBlur={() => setEditingPriceId(null)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') setEditingPriceId(null); }}
+                      value={t.stock_entry_price ?? ''} 
+                      onChange={(e) => onActualizarTransaccion(t.id, 'stock_entry_price', parseFloat(e.target.value) || null)} 
+                      placeholder="0.00" 
+                      className="w-20 px-2 py-1 border border-indigo-500 rounded text-sm font-normal focus:outline-none focus:ring-1 focus:ring-indigo-500 text-right" 
+                    />
                   ) : (
-                    t.stock_entry_price ? formatearMoneda(t.stock_entry_price) : '-'
+                    <div 
+                      onClick={() => setEditingPriceId(t.id)} 
+                      className="cursor-pointer w-full px-2 py-1 border border-transparent hover:bg-gray-100 hover:border-gray-300 rounded text-sm transition-all"
+                      title="Hacé clic para editar el Stock Entry Price del trade"
+                    >
+                      {t.stock_entry_price ? formatearMoneda(t.stock_entry_price) : <span className="text-gray-400">0,00</span>}
+                    </div>
                   )}
                 </td>
                 
@@ -133,7 +131,20 @@ export default function TransactionsTable({
                 <td className={tdRight}>{formatearMoneda(t.amount)}</td>
                 
                 <td className="px-4 py-3 text-sm text-center">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${t.position_status === 'Open' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{t.position_status || 'Open'}</span>
+                  <button
+                    onClick={() => {
+                      const nuevoStatus = t.position_status === 'Open' ? 'Closed' : 'Open';
+                      onActualizarTransaccion(t.id, 'position_status', nuevoStatus);
+                    }}
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-all cursor-pointer border ${
+                      t.position_status === 'Open' 
+                        ? 'bg-green-100 text-green-800 border-green-200 hover:bg-green-200' 
+                        : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+                    }`}
+                    title="Hacé clic para alternar el estado (Open / Closed) de todo el trade"
+                  >
+                    {t.position_status || 'Open'}
+                  </button>
                 </td>
                 
                  {/*<td className="px-4 py-3 text-sm text-gray-900 font-bold whitespace-nowrap text-center">{t.unique_key}</td>*/}
