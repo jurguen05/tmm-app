@@ -2,6 +2,7 @@
 
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
+import { parsearFechaTOS } from '../lib/formatters';
 
 type SupabaseClient = any;
 
@@ -20,14 +21,15 @@ export async function getUserProfile(supabase: SupabaseClient, userId: string): 
   return data;
 }
 
-// 2. Obtener todas las transacciones vinculadas con la tabla maestra trades
-export async function getTransactions(supabase: SupabaseClient): Promise<Transaction[]> {
+// 2. Obtener las transacciones iniciales (primeras 1000) vinculadas con la tabla maestra trades
+export async function getTransactions(supabase: SupabaseClient, limit = 1000): Promise<Transaction[]> {
   const [txRes, tradesRes] = await Promise.all([
     supabase
       .from('transactions')
       .select('*, strategies(name)')
       .order('date', { ascending: false })
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      .limit(limit),
     supabase
       .from('trades')
       .select('*, strategies(name)')
@@ -62,6 +64,74 @@ export async function getTransactions(supabase: SupabaseClient): Promise<Transac
     }
     return t;
   });
+}
+
+// 2b. Buscar transacciones en el servidor filtradas por código, símbolo, estrategia o estado (sin límite de 1000)
+export async function getFilteredTransactions(
+  supabase: SupabaseClient,
+  filters: { trade_code?: string; symbol?: string; strategy?: string; status?: string }
+): Promise<Transaction[]> {
+  let query = supabase
+    .from('transactions')
+    .select('*, strategies(name)')
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (filters.trade_code && filters.trade_code.trim()) {
+    const codeNum = parseInt(filters.trade_code.trim(), 10);
+    if (!isNaN(codeNum)) {
+      query = query.eq('trade_code', codeNum);
+    }
+  }
+
+  if (filters.symbol && filters.symbol.trim()) {
+    query = query.ilike('symbol', `%${filters.symbol.trim()}%`);
+  }
+
+  if (filters.status && filters.status.trim() && filters.status.toLowerCase() !== 'all') {
+    query = query.ilike('position_status', filters.status.trim());
+  }
+
+  const [txRes, tradesRes] = await Promise.all([
+    query,
+    supabase
+      .from('trades')
+      .select('*, strategies(name)')
+  ]);
+
+  if (txRes.error) throw new Error(txRes.error.message);
+  let txs: Transaction[] = txRes.data || [];
+  const trades: Trade[] = tradesRes.data || [];
+
+  const tradesMap = new Map<number, Trade>();
+  for (const tr of trades) {
+    if (tr.trade_code !== null && tr.trade_code !== undefined && !isNaN(Number(tr.trade_code))) {
+      tradesMap.set(Number(tr.trade_code), tr);
+    }
+  }
+
+  let enriched = txs.map((t) => {
+    const codeNum = t.trade_code ? Number(t.trade_code) : null;
+    if (codeNum && tradesMap.has(codeNum)) {
+      const tr = tradesMap.get(codeNum)!;
+      return {
+        ...t,
+        strategy_id: tr.strategy_id ?? t.strategy_id,
+        strategies: tr.strategies || t.strategies,
+        strategy: tr.strategies?.name || t.strategy,
+        position_status: tr.status ?? t.position_status,
+        stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
+        trade: tr
+      };
+    }
+    return t;
+  });
+
+  if (filters.strategy && filters.strategy.trim() && filters.strategy !== 'All') {
+    enriched = enriched.filter(t => (t.strategies?.name || t.strategy) === filters.strategy);
+  }
+
+  return enriched;
 }
 
 // 3. Obtener transacciones por lista de claves únicas (usado para consolidación de estrategias)
@@ -546,6 +616,16 @@ export async function syncTradesForCodes(
       // REGLA OPCIÓN 1: Calcular estado ('Open' o 'Closed') a partir del balance neto de cantidades
       const calculatedStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
 
+      const normDateStr = firstBuyDate ? (parsearFechaTOS(firstBuyDate) || firstBuyDate.substring(0, 10)) : null;
+      const isWeekendTrade = Boolean(
+        codeTxs.some(t => {
+          const sName = t.strategies?.name || t.strategy || '';
+          return sName.toLowerCase().includes('weekend');
+        })
+      );
+      const isBeforeCutoff = Boolean(normDateStr && normDateStr < '2026-07-24');
+      const initialWeekendFlag = isWeekendTrade && isBeforeCutoff;
+
       if (!existing) {
         tradesToUpsert.push({
           trade_code: code,
@@ -555,7 +635,7 @@ export async function syncTradesForCodes(
           stock_entry_price: initialEntryPrice,
           first_buy_date: firstBuyDate,
           status: calculatedStatus,
-          weekend_trader_flag: false,
+          weekend_trader_flag: calculatedStatus === 'Closed' ? false : initialWeekendFlag,
           max_stock_price: calculatedStatus === 'Closed' ? null : undefined,
           max_stock_price_date: calculatedStatus === 'Closed' ? null : undefined,
           account_id: accountId
@@ -572,6 +652,9 @@ export async function syncTradesForCodes(
         if (calculatedStatus === 'Closed') {
           updateObj.max_stock_price = null;
           updateObj.max_stock_price_date = null;
+          updateObj.weekend_trader_flag = false;
+        } else if (isWeekendTrade && isBeforeCutoff) {
+          updateObj.weekend_trader_flag = true;
         }
         tradesToUpsert.push(updateObj);
       }
@@ -588,25 +671,51 @@ export async function syncTradesForCodes(
   }
 }
 
-// 29. Actualizar max_stock_price y max_stock_price_date para una lista de trades (exclusivamente si status es 'Open')
+// 29. Actualizar max_stock_price, max_stock_price_date y weekend_trader_flag para trades abiertos
 export async function updateTradesMaxStockPrices(
   supabase: SupabaseClient,
-  items: { trade_code: number; max_stock_price: number | null; max_stock_price_date: string | null }[]
+  items: { 
+    trade_code: number; 
+    max_stock_price: number | null; 
+    max_stock_price_date: string | null;
+    weekend_trader_flag?: boolean;
+  }[]
 ): Promise<void> {
   if (!items || items.length === 0) return;
   for (const item of items) {
     try {
+      const payload: any = {
+        max_stock_price: item.max_stock_price,
+        max_stock_price_date: item.max_stock_price_date
+      };
+      if (item.weekend_trader_flag === true) {
+        payload.weekend_trader_flag = true;
+      }
       await supabase
         .from('trades')
-        .update({
-          max_stock_price: item.max_stock_price,
-          max_stock_price_date: item.max_stock_price_date
-        })
+        .update(payload)
         .eq('trade_code', item.trade_code)
         .eq('status', 'Open');
     } catch {
       // Fallback seguro si la columna aún no está creada en DB
     }
+  }
+}
+
+// 30. Actualizar permanentemente weekend_trader_flag a true para trades abiertos
+export async function updateTradesWeekendTraderFlags(
+  supabase: SupabaseClient,
+  tradeCodes: number[]
+): Promise<void> {
+  if (!tradeCodes || tradeCodes.length === 0) return;
+  try {
+    await supabase
+      .from('trades')
+      .update({ weekend_trader_flag: true })
+      .in('trade_code', tradeCodes)
+      .eq('status', 'Open');
+  } catch (err: any) {
+    console.warn('[updateTradesWeekendTraderFlags] Error:', err.message);
   }
 }
 

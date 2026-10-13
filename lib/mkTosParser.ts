@@ -48,7 +48,7 @@ export const procesarFilasMkTos = (
       low_100_day: normalizeNumber(row['100-day-Low']),
       high_price: normalizeNumber(row['High']),
       low_price: normalizeNumber(row['Low']),
-      bollinger_bands: normalizeNumber(row['BollingerBands']),
+      bollinger_bands: normalizeNumber(row['BBO'] ?? row['BollingerBands'] ?? row['BBO_STOP'] ?? row['Bollinger Bands']),
       sma_10w: normalizeNumber(row['SMA 10W']),
       mac_stop: normalizeNumber(row['MAC_STOP']),
       trendpilot_stop: normalizeNumber(row['TrendPilot_STOP']),

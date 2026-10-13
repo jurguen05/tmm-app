@@ -30,6 +30,7 @@ This document centralizes the business logic, formulas, and data sources used to
    *When the stock appreciates and the 180-day EMA exceeds the initial protective floor, the stop automatically trails upward.*
 
 ### Alert & Fallback Conditions:
+- **Red Badge Alert:** When $\text{Last Price} < \text{Final Stop}$, the Stop value is displayed with a **red badge** (`bg-red-100 text-red-800 border border-red-300`), identical to the Signal column format.
 - **Missing MK-TOS Quote:** If the symbol is not found in the MK-TOS quotes table or has not been uploaded yet:
   - The `Stop` value is marked as **`Review`**.
   - The row is highlighted with a **yellow background** (`bg-amber-50`) to prompt the operator to upload or verify the MK-TOS quotes file.
@@ -41,17 +42,22 @@ This document centralizes the business logic, formulas, and data sources used to
 - **Strategy Identifier:** `20% Flipper` / `20%Flipper` / `Flipper`
 - **Data Sources:**
   - **Trades Table:** `first_buy_date`, `stock_entry_price`, `max_stock_price`, `max_stock_price_date`
-  - **MK-TOS Quotes:** `last_price`, `quote_date` (all unarchived historical quotes for the symbol $\ge \text{first\_buy\_date}$)
+  - **MK-TOS Quotes:** `high_price` (header `High`), `last_price`, `quote_date` (all unarchived historical quotes for the symbol $\ge \text{first\_buy\_date}$)
   - **Position Statement:** `stock_last` (current active quote)
 
 ### Formulas & Logic:
 1. **Max Stock Price & Date Calculation:**
-   $$\text{Max Stock Price} = \max\left(\text{Stock Entry Price}, \max_{q \in \text{Quotes}, \text{Date}_q \ge \text{first\_buy\_date}} (\text{last\_price}_q), \text{Current Last}\right)$$
+   $$\text{Max Stock Price} = \max\left(\text{Stock Entry Price}, \max_{q \in \text{Quotes}, \text{Date}_q \ge \text{first\_buy\_date}} (\text{high\_price}_q), \text{Current Last}\right)$$
    - Evaluates **all trading days** from the trade's `first_buy_date` to today.
+   - Evaluates the **`High`** column (`high_price`) from MK-TOS quotes to track the absolute maximum intraday peak reached.
    - Preserves the date on which the highest price was recorded (`max_stock_price_date`).
    - If the trade already has a previously persisted `max_stock_price` in the `trades` table that exceeds current quotes, the stored historical high is kept intact.
 
-2. **Persistence, Archiving & Closed Lifecycle Rule:**
+2. **Trailing Stop (0.8 × Max Stock Price):**
+   $$\text{Stop} = \text{Max Stock Price} \times 0.80$$
+   - Red Badge Alert: When $\text{Last Price} < \text{Stop}$, the Stop value is displayed with a **red badge** (`bg-red-100 text-red-800 border border-red-300`), identical to the Signal and Stop alert format.
+
+3. **Persistence, Archiving & Closed Lifecycle Rule:**
    - Both `max_stock_price` and `max_stock_price_date` are autocalculated and stored in the `trades` table **exclusively while the trade is `Open`**.
    - **Trade Closure Rule:** As soon as a trade is marked as `Closed` (via Option 1 net quantity balance $= 0$, or via Option 2 manual confirmation), both `max_stock_price` and `max_stock_price_date` are automatically reset to `NULL`.
    - **Purpose:** Allows older MK-TOS quote CSV files outside the active trade period to be safely archived without losing the peak price reference needed for trailing stop calculations while the position is active.
@@ -63,29 +69,180 @@ This document centralizes the business logic, formulas, and data sources used to
 - **Strategy Identifier:** `Weekend Trader` / `WeekendTrader` (or `weekend_trader_flag = true`)
 - **Data Sources:**
   - **Trades Table:** `first_buy_date`, `stock_entry_price`, `max_stock_price`, `max_stock_price_date`, `weekend_trader_flag`
-  - **MK-TOS Quotes:** `last_price`, `quote_date` (filtered **exclusively to Fridays**)
-  - **Position Statement:** `stock_last` (evaluated only if today is Friday)
+  - **MK-TOS Quotes:** `high_price` (header `High`), `last_price`, `quote_date` (evaluated on weekly close sessions: Fridays, or Thursdays if Friday was a market holiday)
+  - **MK-TOS Quotes (SPY):** `last_price` and `sma_10w` (header `SMA 10W`) for ticker `SPY`
+  - **Position Statement:** `stock_last` (Last Price)
 
 ### Formulas & Logic:
-1. **Friday-Only Peak Evaluation:**
-   - Evaluates quotes from `first_buy_date` to today, but **ONLY considers quotes whose date falls on a Friday** ($\text{Day of week} = 5$ in UTC).
-   - If `first_buy_date` is a Friday, `stock_entry_price` is considered as the initial candidate. If `first_buy_date` was not a Friday, only subsequent Friday quotes are evaluated.
-   - Non-Friday quotes (Monday through Thursday) are strictly ignored for this strategy's peak calculation.
+1. **Weekly Peak High Calculation:**
+   $$\text{High} = \max\left(\text{Stock Entry Price (si cayó en cierre semanal)}, \max_{q \in \text{Quotes Weekly Close}, \text{Date}_q \ge \text{first\_buy\_date}} (\text{high\_price}_q), \text{Current Last (si hoy es cierre semanal)}\right)$$
+   - Evaluates quotes from `first_buy_date` to today, strictly on **weekly close sessions** (Fridays, or Thursdays if Friday was a holiday / no quote).
+   - Evaluates the **`High`** column (`high_price`) to track the highest peak reached.
 
-2. **Persistence, Archiving & Closed Lifecycle Rule:**
-   - Automatically persisted to `trades.max_stock_price` and `trades.max_stock_price_date` exclusively while `status = 'Open'`.
-   - When the trade transitions to `Closed`, both fields are automatically set to `NULL`.
-   - Protects stop reference points against future MK-TOS CSV archiving.
+2. **General Market Filter (SPY vs SMA 10W):**
+   Evaluates the latest weekly close for the S&P 500 ETF (`SPY`):
+   - **Bullish Market / Normal ($\text{SPY.Last} > \text{SPY.SMA\_10W}$):**
+     $$\text{Stop} = \text{High} \times 0.60$$
+     *(Trailing stop configurado con un 40% de caída desde el máximo).*
+   - **Bearish Market / Defensivo ($\text{SPY.Last} \le \text{SPY.SMA\_10W}$):**
+     $$\text{Stop} = \text{High} \times 0.90$$
+     *(Stop defensivo configurado con un 10% de caída desde el máximo).*
+
+3. **Permanent Trade Flag Rule (Ratchet Irreversible):**
+   - **Regla Histórica de Compra:** Todas las operaciones de Weekend Trader compradas antes del **24/07/2026** (`first_buy_date < '2026-07-24'`) tienen el flag activo por definición (**`weekend_trader_flag = true`**), fijando su stop permanentemente en $\text{High} \times 0.90$.
+   - **Regla Dinámica posterior:** Para operaciones compradas a partir del 24/07/2026, una vez que la operación experimenta un cierre semanal con $\text{SPY.Last} \le \text{SPY.SMA\_10W}$, queda marcada con **`weekend_trader_flag = true`** en la tabla `trades`.
+   - Una vez flageada, su stop **permanece en $\text{High} \times 0.90$ para siempre**, incluso si en semanas posteriores el SPY vuelve a superar la `SMA 10W`.
+   - Nuevas operaciones abiertas posteriormente arrancan con $\text{High} \times 0.60$ si al momento de su ciclo el SPY está alcista.
+
+4. **Alert & Review Conditions:**
+   - **Red Badge Alert:** Cuando $\text{Last Price} < \text{Stop}$, la celda se resalta con badge rojo (`bg-red-100 text-red-800 border border-red-300`).
+   - **Missing SPY in MK-TOS:** Si `SPY` no está presente en MK-TOS, o falta el pico `High`, la fila pasa automáticamente a **`Review`** con aviso explicativo.
+
+5. **Persistence, Archiving & Closed Lifecycle Rule:**
+   - Tanto `max_stock_price`, `max_stock_price_date` como `weekend_trader_flag` se persisten exclusivamente mientras el trade está **`Open`**.
+   - Al pasar a `Closed`, los precios máximos se reinician a `NULL`.
 
 ---
 
-## 4. Upcoming Strategies Roadmap
+## 4. Trend Pilot
 
-The following strategies will be documented and implemented incrementally:
-- **Hedge:** Initial protective stop rules.
-- **100-day-High:** MK-TOS `low_100_day` trailing indicator.
-- **BBO:** Bollinger Bands trailing indicators (`bollinger_bands`).
-- **New Yearly Highs:** 52-week low/high indicator logic.
-- **MACD / MAC:** `mac_stop` indicator.
-- **Trend Pilot:** `trendpilot_stop` indicator.
+- **Strategy Identifier:** `Trend Pilot` / `TrendPilot` / `Tend Pilot` / `TendPilot`
+- **Data Sources:**
+  - **MK-TOS Quotes:** `trendpilot_stop` (header `TrendPilot_STOP`)
+  - **Position Statement:** `stock_last` (Last Price)
+
+### Formulas & Logic:
+1. **Signal Column (before Last):**
+   - Displays the indicator value extracted from `trendpilot_stop` (`TrendPilot_STOP`) when **$\ge 3$**. Otherwise displays **`'-'`**.
+2. **Stop Value:**
+   - Always displays the current **`Last Price`**:
+     $$\text{Stop} = \text{Last Price}$$
+3. **Trigger Condition ($\ge 3$):**
+   - When the signal value is **$\ge 3$**:
+     - The Stop value is displayed with a **red badge** (`bg-red-100 text-red-800 border border-red-300`), matching the Signal column format.
+   - When the signal value is **$< 3$**:
+     - The Stop cell retains standard styling (not highlighted in red).
+4. **Missing MK-TOS Quote:**
+   - If the symbol is not found in MK-TOS quotes, the position is marked as **`Review`** with a yellow row alert.
+
+---
+
+## 5. MAC (MACD)
+
+- **Strategy Identifier:** `MAC` / `MACD`
+- **Data Sources:**
+  - **MK-TOS Quotes:** `mac_stop` (header `MAC_STOP`)
+  - **Position Statement:** `stock_last` (Last Price)
+
+### Formulas & Logic:
+1. **Signal Column (before Last):**
+   - Displays the indicator value extracted from `mac_stop` (`MAC_STOP`) when **$\ge 3$**. Otherwise displays **`'-'`**.
+2. **Stop Value:**
+   - Always displays the current **`Last Price`**:
+     $$\text{Stop} = \text{Last Price}$$
+3. **Trigger Condition ($\ge 3$):**
+   - When the signal value is **$\ge 3$**:
+     - The Stop value is displayed with a **red badge** (`bg-red-100 text-red-800 border border-red-300`), matching the Signal column format.
+   - When the signal value is **$< 3$**:
+     - The Stop cell retains standard styling (not highlighted in red).
+4. **Missing MK-TOS Quote:**
+   - If the symbol is not found in MK-TOS quotes, the position is marked as **`Review`** with a yellow row alert.
+
+---
+
+## 6. New Yearly Highs
+
+- **Strategy Identifier:** `New Yearly Highs` / `New Yearly High` / `NewYearlyHighs`
+- **Data Sources:**
+  - **MK-TOS Quotes:** `low_52` (header `52Low`, 250-trading-day / 52-week minimum price)
+  - **Position Statement:** `stock_last` (Last Price)
+
+### Formulas & Logic:
+1. **Stop Value:**
+   $$\text{Stop} = \text{quote.low\_52}$$
+   Displays the 52-week low directly from the active MK-TOS quote (`52Low`).
+2. **Trigger Condition (Red Alert):**
+   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra/cotiza por debajo del nuevo mínimo de 250 días / 52 semanas bursátiles):
+     - The Stop cell is highlighted with a **red badge** (`bg-red-100 text-red-800 border border-red-300`).
+   - When $\text{Last Price} \ge \text{Stop}$:
+     - The Stop cell retains standard styling.
+3. **Missing MK-TOS Quote:**
+   - If the symbol is not found in MK-TOS quotes or `52Low` is missing/zero, the position is marked as **`Review`** with a yellow row alert.
+
+---
+
+## 7. 100-day-High
+
+- **Strategy Identifier:** `100-day-High` / `100 Day High` / `100dayhigh`
+- **Data Sources:**
+  - **MK-TOS Quotes:** `low_100_day` (header `100-day-Low`, minimum price over the trailing 100 trading days)
+  - **Position Statement:** `stock_last` (Last Price)
+
+### Formulas & Logic:
+1. **Stop Value:**
+   $$\text{Stop} = \text{quote.low\_100\_day}$$
+   Displays the 100-day low directly from the active MK-TOS quote (`100-day-Low`).
+2. **Trigger Condition (Red Alert / Vender):**
+   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra o cotiza por debajo del mínimo de los últimos 100 días):
+     - The Stop cell is highlighted with a **red badge** (`bg-red-100 text-red-800 border border-red-300`).
+   - When $\text{Last Price} \ge \text{Stop}$:
+     - The Stop cell retains standard styling.
+3. **Missing MK-TOS Quote:**
+   - If the symbol is not found in MK-TOS quotes or `100-day-Low` is missing/zero, the position is marked as **`Review`** with a yellow row alert.
+
+---
+
+## 8. BBO (Bollinger Bands)
+
+- **Strategy Identifier:** `BBO` / `Bollinger Bands` / `Bollinger`
+- **Data Sources:**
+  - **MK-TOS Quotes:** `bollinger_bands` (header `BBO` / `BollingerBands`, representing the lower Bollinger Band configured at 1 standard deviation)
+  - **Position Statement:** `stock_last` (Last Price)
+
+### Formulas & Logic:
+1. **Stop Value:**
+   $$\text{Stop} = \text{quote.bollinger\_bands}$$
+   Displays the lower Bollinger Band (1 standard deviation) directly from the active MK-TOS quote (`BBO`).
+2. **Trigger Condition / Punto de salida (Red Alert):**
+   - When $\text{Last Price} < \text{Stop}$ (el precio de la acción registra un cierre por debajo de la banda inferior configurada a 1 desviación estándar):
+     - The Stop cell is highlighted with a **red badge** (`bg-red-100 text-red-800 border border-red-300`).
+   - When $\text{Last Price} \ge \text{Stop}$:
+     - The Stop cell retains standard styling.
+3. **Missing MK-TOS Quote:**
+   - If the symbol is not found in MK-TOS quotes or `bollinger_bands` is missing/zero, the position is marked as **`Review`** with a yellow row alert.
+
+---
+
+## 9. Hedge
+
+- **Strategy Identifier:** `Hedge` / `hegde` / `Hedging`
+- **Data Sources:**
+  - **Position Statement:** `stock_last` (Last Price)
+- **Formulas & Logic:**
+  1. **Stop Value:**
+     $$\text{Stop} = \text{Last Price}$$
+     Always displays the current Last Price.
+  2. **No Stop Rule / Trigger:**
+     Hedge positions do not execute an automatic stop-loss exit rule. The Stop cell remains informational and will not trigger a red badge alert (`isStopRed = false`).
+  3. **Missing Last Price:**
+     If `Last Price` is missing or $\le 0$, the position is flagged as **`Review`**.
+
+---
+
+## 10. Global Review Rule (Handling '-' and Uncalculated Stops)
+
+- **Rule:** Any position whose Stop value cannot be calculated or would otherwise display as **`'-'`** (due to any new unconfigured strategy, missing MK-TOS quotes, or missing peak prices) is automatically treated as **`Review`**.
+- **Display Behavior:**
+  - The Stop cell displays a **`⚠️ Review`** badge (`bg-amber-200 text-amber-900 border border-amber-400`).
+  - The Stop cell has a warning background (`bg-amber-100/80 border-y border-amber-300`).
+  - The row has a warning highlight (`bg-amber-50 hover:bg-amber-100 border-l-4 border-l-amber-400`).
+  - The row is included in the **`⚠️ Review (N)`** quick filter button count and filtered view.
+
+---
+
+## 11. Upcoming Strategies Roadmap
+
+All current standard strategies (Tech Trader, Trend Pilot, MAC, 20% Flipper, Weekend Trader, New Yearly Highs, 100-day-High, BBO, and Hedge) have their Stop rules configured. Any additional strategies added to the system will be documented here.
+
+
 

@@ -124,3 +124,34 @@ export const esViernes = (fechaISO: string | null | undefined): boolean => {
   const dt = new Date(Date.UTC(y, m, d));
   return dt.getUTCDay() === 5; // 5 = Viernes (0 = Domingo)
 };
+
+/**
+ * Determina si una fecha en formato ISO "YYYY-MM-DD" corresponde a una sesión de cierre semanal:
+ * - Viernes (5)
+ * - Jueves (4) si el viernes siguiente no figura en el conjunto de fechas de cotizaciones disponibles (feriado bursátil)
+ */
+export const esCierreSemanal = (
+  fechaISO: string | null | undefined,
+  fechasDisponibles?: Set<string>
+): boolean => {
+  if (!fechaISO) return false;
+  const match = fechaISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10) - 1;
+  const d = parseInt(match[3], 10);
+  const dt = new Date(Date.UTC(y, m, d));
+  const day = dt.getUTCDay();
+
+  // 1. Viernes
+  if (day === 5) return true;
+
+  // 2. Jueves si el viernes no tuvo cotización registrada (feriado bursátil)
+  if (day === 4 && fechasDisponibles && fechasDisponibles.size > 0) {
+    const nextDay = new Date(Date.UTC(y, m, d + 1));
+    const nextDayISO = nextDay.toISOString().substring(0, 10);
+    return !fechasDisponibles.has(nextDayISO);
+  }
+
+  return false;
+};

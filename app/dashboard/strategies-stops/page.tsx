@@ -8,7 +8,9 @@ import {
   getLatestMkTosQuotes, 
   getTransactionsByTradeCodes, 
   getOpenTrades,
-  updateTradesMaxStockPrices 
+  getActiveStrategies,
+  updateTradesMaxStockPrices,
+  updateTradesWeekendTraderFlags 
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 
@@ -50,13 +52,15 @@ export default async function StrategiesStopsPage() {
       }
     }
 
-    const symbols = Array.from(new Set(positions.map(p => p.symbol).filter(Boolean)))
+    // Asegurarse de incluir SPY para evaluar el filtro de mercado de Weekend Trader
+    const symbols = Array.from(new Set([...positions.map(p => p.symbol).filter(Boolean), 'SPY']))
     
-    // 1. Obtener transacciones directamente vinculadas, cotizaciones MK-TOS y trades maestros
-    const [initialTxs, mkTosQuotes, openTrades] = await Promise.all([
+    // 1. Obtener transacciones directamente vinculadas, cotizaciones MK-TOS, trades maestros y lista de estrategias
+    const [initialTxs, mkTosQuotes, openTrades, activeStrategies] = await Promise.all([
       getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)),
       getLatestMkTosQuotes(supabase, symbols),
-      getOpenTrades(supabase)
+      getOpenTrades(supabase),
+      getActiveStrategies(supabase).catch(() => [])
     ])
 
     // 2. Extraer los trade_codes activos para traer el historial completo del trade (incluidas opciones o compras iniciales)
@@ -76,19 +80,29 @@ export default async function StrategiesStopsPage() {
       allRelevantTransactions = Array.from(txMap.values())
     }
 
-    consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades)
+    consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades, activeStrategies)
 
-    // Persistir max_stock_price y max_stock_price_date calculados en la tabla trades
+    // Persistir max_stock_price, max_stock_price_date y weekend_trader_flag en la tabla trades
     const tradesWithMax = consolidado
-      .filter(c => c.trade_code && c.trade_code !== '-' && c.max_stock_price !== null && c.max_stock_price !== undefined)
+      .filter(c => c.trade_code && c.trade_code !== '-')
       .map(c => ({
         trade_code: Number(c.trade_code),
         max_stock_price: c.max_stock_price ?? null,
-        max_stock_price_date: c.max_stock_price_date ?? null
+        max_stock_price_date: c.max_stock_price_date ?? null,
+        weekend_trader_flag: c.weekend_trader_flag
       }));
 
     if (tradesWithMax.length > 0) {
       await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {});
+    }
+
+    // Persistir irreversiblemente el flag de Weekend Trader en trades abiertos cuando sea true
+    const weekendTradesToFlag = consolidado
+      .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
+      .map(c => Number(c.trade_code));
+
+    if (weekendTradesToFlag.length > 0) {
+      await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {});
     }
 
     // Detectar trades marcados como 'Open' pero ausentes en el Position Statement de hoy (Opción 2 con aviso)

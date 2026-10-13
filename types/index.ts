@@ -113,6 +113,7 @@ export interface ConsolidatedStrategyStop {
   strategy: string;
   strategy_id?: number | null;
   entryPrice: number;
+  signal?: number | null;
   lastPrice: number;
   first_buy_date?: string | null;
   weekend_trader_flag?: boolean;
@@ -120,6 +121,8 @@ export interface ConsolidatedStrategyStop {
   max_stock_price_date?: string | null;
   stop: string | number;
   stopValue?: number | null;
+  isStopRed?: boolean;
   needsReview?: boolean;
+  reviewReason?: string;
   rentabilidad: number;
 }

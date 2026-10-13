@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { updateTransactionField, deleteTransactions, updateTradeField, updateTransactionsByTradeCode } from '../services/queries'
+import { updateTransactionField, deleteTransactions, updateTradeField, updateTransactionsByTradeCode, getFilteredTransactions } from '../services/queries'
 import { Transaction, Strategy } from '../types'
 import TransactionsTable from './TransactionsTable'
 import PaginationControls from './PaginationControls'
@@ -25,12 +25,35 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   const [paginaActual, setPaginaActual] = useState(1)
   const [elementosPorPagina, setElementosPorPagina] = useState(25)
 
-  // Sincronizar transacciones si initialTransactions cambia (sin efecto en cascada)
+  const hayFiltrosActivos = filtros.trade_code !== '' || filtros.symbol !== '' || filtros.strategy !== '' || filtros.status !== ''
+
+  // Sincronizar transacciones si initialTransactions cambia (sin sobreescribir si hay filtro activo)
   const [prevInitial, setPrevInitial] = useState(initialTransactions)
   if (prevInitial !== initialTransactions) {
     setPrevInitial(initialTransactions)
-    setTransacciones(initialTransactions)
+    if (!hayFiltrosActivos) {
+      setTransacciones(initialTransactions)
+    }
   }
+
+  // Búsqueda en el servidor cuando se activa un filtro (trae todas las transacciones históricas del filtro)
+  useEffect(() => {
+    if (!hayFiltrosActivos) {
+      setTransacciones(initialTransactions)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const resultados = await getFilteredTransactions(supabase, filtros)
+        setTransacciones(resultados)
+      } catch (err: any) {
+        console.error('Error buscando transacciones filtradas:', err)
+      }
+    }, 250)
+
+    return () => clearTimeout(timer)
+  }, [filtros, hayFiltrosActivos, initialTransactions])
 
   const actualizarTransaccion = async (id: string, campo: string, valor: any) => {
     const tx = transacciones.find(t => t.id === id)
@@ -106,8 +129,8 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
       const matchCodigo = filtros.trade_code === '' || (t.trade_code && t.trade_code.toString().includes(filtros.trade_code));
       const matchSymbol = filtros.symbol === '' || (t.symbol && t.symbol.toLowerCase().includes(filtros.symbol.toLowerCase()));
       
-      const strategyName = t.strategies?.name || '';
-      const matchStrategy = filtros.strategy === '' || strategyName === filtros.strategy;
+      const strategyName = t.strategies?.name || t.strategy || (t.strategy_id ? estrategias.find(e => e.id === t.strategy_id)?.name : '') || '';
+      const matchStrategy = filtros.strategy === '' || strategyName.toLowerCase() === filtros.strategy.toLowerCase();
       
       const matchStatus = filtros.status === '' || (t.position_status && t.position_status.toLowerCase() === filtros.status.toLowerCase());
       return matchCodigo && matchSymbol && matchStrategy && matchStatus;
@@ -123,8 +146,6 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
     setFiltros(nuevoFiltro)
     setPaginaActual(1)
   }
-
-  const hayFiltrosActivos = filtros.trade_code !== '' || filtros.symbol !== '' || filtros.strategy !== '' || filtros.status !== ''
 
   // Transacciones paginadas
   const indiceInicio = (paginaValida - 1) * elementosPorPagina
