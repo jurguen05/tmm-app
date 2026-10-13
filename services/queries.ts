@@ -389,6 +389,7 @@ export async function getDashboardSummaryCounts(supabase: SupabaseClient): Promi
 const MK_TOS_QUOTE_COLUMNS =
   'id, quote_date, symbol, last_price, high_price, low_52, low_100_day, ema, bollinger_bands, sma_10w, mac_stop, trendpilot_stop';
 const MK_TOS_PAGE_SIZE = 1000;
+const MK_TOS_PARALLEL_PAGES = 3;
 
 // 21. Obtener cotizaciones vigentes de MK-TOS (opcionalmente filtradas por símbolos)
 // Pagina con range() porque PostgREST limita cada respuesta a 1000 filas por defecto.
@@ -396,9 +397,8 @@ export async function getLatestMkTosQuotes(
   supabase: SupabaseClient,
   symbols?: string[]
 ): Promise<MkTosQuote[]> {
-  const all: MkTosQuote[] = [];
-
-  for (let from = 0; ; from += MK_TOS_PAGE_SIZE) {
+  const fetchPage = async (page: number): Promise<MkTosQuote[]> => {
+    const from = page * MK_TOS_PAGE_SIZE;
     let query = supabase
       .from('mk_tos_quotes')
       .select(`${MK_TOS_QUOTE_COLUMNS}, file_uploads!inner(is_archived)`)
@@ -413,13 +413,20 @@ export async function getLatestMkTosQuotes(
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
+    return (data || []) as unknown as MkTosQuote[];
+  };
 
-    const rows = (data || []) as unknown as MkTosQuote[];
-    all.push(...rows);
-    if (rows.length < MK_TOS_PAGE_SIZE) break;
+  // Se piden varias páginas a la vez (en vez de una tras otra) para evitar sumar latencias.
+  const all: MkTosQuote[] = [];
+  for (let page = 0; ; page += MK_TOS_PARALLEL_PAGES) {
+    const batch = await Promise.all(
+      Array.from({ length: MK_TOS_PARALLEL_PAGES }, (_, i) => fetchPage(page + i))
+    );
+    for (const rows of batch) {
+      all.push(...rows);
+      if (rows.length < MK_TOS_PAGE_SIZE) return all;
+    }
   }
-
-  return all;
 }
 
 // 22. Obtener todas las transacciones asociadas a una lista de trade_codes
