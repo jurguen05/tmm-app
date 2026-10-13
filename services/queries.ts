@@ -385,24 +385,41 @@ export async function getDashboardSummaryCounts(supabase: SupabaseClient): Promi
   };
 }
 
+// Columnas de mk_tos_quotes realmente usadas por strategiesCalculator (ver MkTosQuote en types/index.ts)
+const MK_TOS_QUOTE_COLUMNS =
+  'id, quote_date, symbol, last_price, high_price, low_52, low_100_day, ema, bollinger_bands, sma_10w, mac_stop, trendpilot_stop';
+const MK_TOS_PAGE_SIZE = 1000;
+
 // 21. Obtener cotizaciones vigentes de MK-TOS (opcionalmente filtradas por símbolos)
+// Pagina con range() porque PostgREST limita cada respuesta a 1000 filas por defecto.
 export async function getLatestMkTosQuotes(
   supabase: SupabaseClient,
   symbols?: string[]
 ): Promise<MkTosQuote[]> {
-  let query = supabase
-    .from('mk_tos_quotes')
-    .select('*, file_uploads!inner(is_archived)')
-    .eq('file_uploads.is_archived', false)
-    .order('quote_date', { ascending: false });
+  const all: MkTosQuote[] = [];
 
-  if (symbols && symbols.length > 0) {
-    query = query.in('symbol', symbols);
+  for (let from = 0; ; from += MK_TOS_PAGE_SIZE) {
+    let query = supabase
+      .from('mk_tos_quotes')
+      .select(`${MK_TOS_QUOTE_COLUMNS}, file_uploads!inner(is_archived)`)
+      .eq('file_uploads.is_archived', false)
+      .order('quote_date', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + MK_TOS_PAGE_SIZE - 1);
+
+    if (symbols && symbols.length > 0) {
+      query = query.in('symbol', symbols);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+
+    const rows = (data || []) as unknown as MkTosQuote[];
+    all.push(...rows);
+    if (rows.length < MK_TOS_PAGE_SIZE) break;
   }
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data || [];
+  return all;
 }
 
 // 22. Obtener todas las transacciones asociadas a una lista de trade_codes
