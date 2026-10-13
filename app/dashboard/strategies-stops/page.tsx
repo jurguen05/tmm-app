@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { connection } from 'next/server'
+import { connection, after } from 'next/server'
 import StrategiesStopsTable from '../../../components/StrategiesStopsTable'
 import { 
   getPositions, 
@@ -31,7 +31,12 @@ export default async function StrategiesStopsPage() {
     }
   )
 
-  const positions = await getPositions(supabase)
+  // Independientes de positions: se lanzan en paralelo
+  const [positions, openTrades, activeStrategies] = await Promise.all([
+    getPositions(supabase),
+    getOpenTrades(supabase),
+    getActiveStrategies(supabase).catch(() => [])
+  ])
   let consolidado: ReturnType<typeof consolidarStrategiesStops> = []
   let missingOpenTrades: any[] = []
 
@@ -54,31 +59,39 @@ export default async function StrategiesStopsPage() {
 
     // Asegurarse de incluir SPY para evaluar el filtro de mercado de Weekend Trader
     const symbols = Array.from(new Set([...positions.map(p => p.symbol).filter(Boolean), 'SPY']))
-    
-    // 1. Obtener transacciones directamente vinculadas, cotizaciones MK-TOS, trades maestros y lista de estrategias
-    const [initialTxs, mkTosQuotes, openTrades, activeStrategies] = await Promise.all([
-      getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)),
-      getLatestMkTosQuotes(supabase, symbols),
-      getOpenTrades(supabase),
-      getActiveStrategies(supabase).catch(() => [])
-    ])
 
-    // 2. Extraer los trade_codes activos para traer el historial completo del trade (incluidas opciones o compras iniciales)
-    const activeTradeCodes = Array.from(new Set(
-      initialTxs
-        .filter(t => t.position_status?.toLowerCase() === 'open' && t.trade_code)
+    // Pre-cargar el historial completo de los trades abiertos (por trade_code) en paralelo con el resto
+    const prefetchedCodes = Array.from(new Set(
+      (openTrades || [])
         .map(t => Number(t.trade_code))
         .filter(c => !isNaN(c) && c > 0)
     ))
 
-    let allRelevantTransactions = initialTxs
-    if (activeTradeCodes.length > 0) {
-      const fullTradeTxs = await getTransactionsByTradeCodes(supabase, activeTradeCodes)
-      const txMap = new Map<string, typeof initialTxs[0]>()
-      initialTxs.forEach(t => txMap.set(t.id, t))
-      fullTradeTxs.forEach(t => txMap.set(t.id, t))
-      allRelevantTransactions = Array.from(txMap.values())
-    }
+    // 1. Obtener transacciones vinculadas, cotizaciones MK-TOS e historial de trades abiertos
+    const [initialTxs, mkTosQuotes, prefetchedTxs] = await Promise.all([
+      getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)),
+      getLatestMkTosQuotes(supabase, symbols),
+      getTransactionsByTradeCodes(supabase, prefetchedCodes)
+    ])
+
+    // 2. Solo si hay trade_codes activos que no estaban pre-cargados, traerlos (fallback)
+    const prefetchedSet = new Set(prefetchedCodes)
+    const missingTradeCodes = Array.from(new Set(
+      initialTxs
+        .filter(t => t.position_status?.toLowerCase() === 'open' && t.trade_code)
+        .map(t => Number(t.trade_code))
+        .filter(c => !isNaN(c) && c > 0 && !prefetchedSet.has(c))
+    ))
+
+    const extraTxs = missingTradeCodes.length > 0
+      ? await getTransactionsByTradeCodes(supabase, missingTradeCodes)
+      : []
+
+    const txMap = new Map<string, typeof initialTxs[0]>()
+    initialTxs.forEach(t => txMap.set(t.id, t))
+    prefetchedTxs.forEach(t => txMap.set(t.id, t))
+    extraTxs.forEach(t => txMap.set(t.id, t))
+    const allRelevantTransactions = Array.from(txMap.values())
 
     consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades, activeStrategies)
 
@@ -92,18 +105,20 @@ export default async function StrategiesStopsPage() {
         weekend_trader_flag: c.weekend_trader_flag
       }));
 
-    if (tradesWithMax.length > 0) {
-      await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {});
-    }
-
     // Persistir irreversiblemente el flag de Weekend Trader en trades abiertos cuando sea true
     const weekendTradesToFlag = consolidado
       .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
       .map(c => Number(c.trade_code));
 
-    if (weekendTradesToFlag.length > 0) {
-      await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {});
-    }
+    // Las escrituras corren después de enviar la respuesta para no bloquear el render
+    after(async () => {
+      if (tradesWithMax.length > 0) {
+        await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {})
+      }
+      if (weekendTradesToFlag.length > 0) {
+        await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {})
+      }
+    })
 
     // Detectar trades marcados como 'Open' pero ausentes en el Position Statement de hoy (Opción 2 con aviso)
     const activeConsolidatedCodes = new Set(

@@ -682,7 +682,7 @@ export async function updateTradesMaxStockPrices(
   }[]
 ): Promise<void> {
   if (!items || items.length === 0) return;
-  for (const item of items) {
+  await Promise.all(items.map(async (item) => {
     try {
       const payload: any = {
         max_stock_price: item.max_stock_price,
@@ -699,7 +699,7 @@ export async function updateTradesMaxStockPrices(
     } catch {
       // Fallback seguro si la columna aún no está creada en DB
     }
-  }
+  }));
 }
 
 // 30. Actualizar permanentemente weekend_trader_flag a true para trades abiertos

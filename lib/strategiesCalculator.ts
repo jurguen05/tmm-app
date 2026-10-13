@@ -171,9 +171,24 @@ export const consolidarStrategiesStops = (
     latestWeeklySpyQuote!.last_price <= latestWeeklySpyQuote!.sma_10w
   );
 
+  // Pre-indexar transacciones una sola vez (evita O(posiciones × transacciones))
+  const txsByNormKey = new Map<string, Transaction[]>();
+  const txsByTradeCode = new Map<string, Transaction[]>();
+  for (const t of transactions || []) {
+    const nk = normalizeUniqueKey(t.unique_key);
+    const byKey = txsByNormKey.get(nk);
+    if (byKey) byKey.push(t); else txsByNormKey.set(nk, [t]);
+
+    if (t.trade_code !== null && t.trade_code !== undefined) {
+      const tc = String(t.trade_code);
+      const byCode = txsByTradeCode.get(tc);
+      if (byCode) byCode.push(t); else txsByTradeCode.set(tc, [t]);
+    }
+  }
+
   const consolidado: ConsolidatedStrategyStop[] = positions.map((pos) => {
     const posNormKey = normalizeUniqueKey(pos.unique_key);
-    const txsDelCodigo = transactions?.filter(t => normalizeUniqueKey(t.unique_key) === posNormKey) || [];
+    const txsDelCodigo = txsByNormKey.get(posNormKey) || [];
     
     // Filtrar transacciones abiertas ordenadas de más reciente a más antigua
     const txsOpen = txsDelCodigo.filter(t => t.position_status?.toLowerCase() === 'open');
@@ -191,7 +206,7 @@ export const consolidarStrategiesStops = (
 
     // Para el trade actual, buscar la primera compra cronológica de TODO el trade
     const txsDelTradeActual = trade_code && trade_code !== '-'
-      ? (transactions?.filter(t => t.trade_code !== null && t.trade_code !== undefined && String(t.trade_code) === String(trade_code)) || [])
+      ? (txsByTradeCode.get(String(trade_code)) || [])
       : txsDelCodigo;
 
     const txsOrdenadasFechas = [...txsDelTradeActual].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
