@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
+import { updateTransactionField, deleteTransactions } from '../services/queries'
 import { Transaction, Strategy } from '../types'
 import TransactionsTable from './TransactionsTable'
 import PaginationControls from './PaginationControls'
@@ -35,8 +36,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
     // Optimistic UI update
     setTransacciones(prev => prev.map(t => t.id === id ? { ...t, [campo]: valor } : t))
     try {
-      const { error } = await supabase.from('transactions').update({ [campo]: valor }).eq('id', id)
-      if (error) throw new Error(error.message)
+      await updateTransactionField(supabase, id, campo, valor)
       router.refresh() // Avisar al server que los datos cambiaron
     } catch (error: any) {
       alert('Hubo un error al guardar el cambio: ' + error.message)
@@ -46,8 +46,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   const borrarSeleccionadas = async () => {
     if (!confirm(`¿Estás seguro de que querés borrar ${selectedIds.length} transacción/es?`)) return
     try {
-      const { error } = await supabase.from('transactions').delete().in('id', selectedIds)
-      if (error) throw new Error(error.message)
+      await deleteTransactions(supabase, selectedIds)
       
       setTransacciones(prev => prev.filter(t => !selectedIds.includes(t.id)))
       setSelectedIds([])

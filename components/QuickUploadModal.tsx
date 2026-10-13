@@ -1,20 +1,21 @@
 'use client'
 
 import { useState, useRef, DragEvent, ChangeEvent } from 'react'
-import Papa from 'papaparse'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { subirArchivoPositions, subirArchivoOriginal, subirArchivoMkTos } from '../lib/storage'
-import { procesarFilasPosiciones } from '../lib/positionsParser'
-import { procesarFilasMkTos } from '../lib/mkTosParser'
-import { parsearFechaTOS } from '../lib/formatters'
+import { ModuleType } from '../types'
+import { checkFileUploadExists } from '../services/queries'
+import { 
+  detectarModuloArchivo, 
+  processPositionsUpload, 
+  processTransactionsUpload, 
+  processMkTosUpload 
+} from '../services/fileUploadService'
 
 interface QuickUploadModalProps {
   isOpen: boolean
   onClose: () => void
 }
-
-type ModuleType = 'positions' | 'transactions' | 'mk-tos'
 
 interface SlotState {
   file: File | null
@@ -54,30 +55,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
     onClose()
   }
 
-  // Detect matching module by filename and content inspection
-  const detectarModulo = async (file: File): Promise<ModuleType | null> => {
-    const nombre = file.name.toLowerCase()
-
-    if (nombre.includes('position')) return 'positions'
-    if (nombre.includes('transaction')) return 'transactions'
-    if (nombre.includes('quote') || nombre.includes('mk-tos') || nombre.includes('mktos')) return 'mk-tos'
-
-    // Fallback: preview first few lines to check headers
-    try {
-      const slice = file.slice(0, 2048)
-      const text = (await slice.text()).toLowerCase()
-
-      if (text.includes('instrument,qty') || text.includes('position statement')) return 'positions'
-      if (text.includes('trade_code') || text.includes('exec time') || (text.includes('action') && text.includes('symbol'))) return 'transactions'
-      if (text.includes('symbol,description') || text.includes('market depth') || text.includes('52high')) return 'mk-tos'
-    } catch {
-      // Ignore preview read error
-    }
-
-    return null
-  }
-
-  // Categorize files and check immediately for duplicates in Supabase
+  // Clasifica los archivos y valida duplicados contra la base de datos
   const clasificarArchivos = async (archivos: FileList | File[]) => {
     const listaArchivos = Array.from(archivos).filter(f => f.name.toLowerCase().endsWith('.csv'))
 
@@ -90,20 +68,15 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
     const nuevasAdvertencias: string[] = []
 
     for (const file of listaArchivos) {
-      const modulo = await detectarModulo(file)
+      const modulo = await detectarModuloArchivo(file)
 
       if (!modulo) {
         nuevasAdvertencias.push(`Could not identify the module for "${file.name}". Please make sure the filename includes "Position", "Transaction", or "Quote".`)
         continue
       }
 
-      // Check for duplicates in Supabase file_uploads table
-      const { data: archivoExistente } = await supabase
-        .from('file_uploads')
-        .select('id, file_name, created_at')
-        .eq('file_name', file.name)
-        .eq('module', modulo)
-        .maybeSingle()
+      // Consulta de duplicados mediante la capa de servicios
+      const archivoExistente = await checkFileUploadExists(supabase, file.name, modulo)
 
       if (archivoExistente) {
         nuevosSlots[modulo] = {
@@ -158,326 +131,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
     }))
   }
 
-  const normalizeNumber = (value: string | undefined | null) => {
-    if (!value) return 0
-    const cleanStr = value.toString().replace(/[^0-9.-]+/g, '')
-    const num = parseFloat(cleanStr)
-    return isNaN(num) ? 0 : num
-  }
-
-  // --- MODULE PROCESSING IMPLEMENTATIONS (BUCKET RULES COMPLIANT) ---
-
-  // 1. POSITIONS: Bucket "Positions", storage_path: `${accountId}/${file.name}`
-  const procesarPositions = async (file: File): Promise<string> => {
-    const { data: archivoExistente } = await supabase
-      .from('file_uploads')
-      .select('id')
-      .eq('file_name', file.name)
-      .eq('module', 'positions')
-      .maybeSingle()
-
-    if (archivoExistente) {
-      throw new Error(`The file "${file.name}" was already uploaded previously.`)
-    }
-
-    const matchAccount = file.name.match(/([A-Z]{3}\d{3})/)
-    const accountId = matchAccount ? matchAccount[1] : 'DESCONOCIDO'
-
-    const csvText = await file.text()
-    const lineas = csvText.split('\n')
-    const statementDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0]
-
-    let headerIndex = 0
-    for (let i = 0; i < lineas.length; i++) {
-      if (lineas[i].startsWith('Instrument,Qty')) {
-        headerIndex = i
-        break
-      }
-    }
-
-    const lineasUtiles = lineas.slice(headerIndex)
-    const lineasLimpias = lineasUtiles.map(linea => {
-      let l = linea.trim()
-      if (l.startsWith('"') && l.endsWith('"')) {
-        l = l.substring(1, l.length - 1).replace(/""/g, '"')
-      }
-      return l
-    })
-    const csvLimpio = lineasLimpias.join('\n')
-
-    return new Promise((resolve, reject) => {
-      Papa.parse(csvLimpio, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          let fileRecordId: string | null = null
-          try {
-            const filasProcesadas = procesarFilasPosiciones(results.data, statementDate)
-
-            if (filasProcesadas.length === 0) {
-              return reject(new Error('No valid position records found in file.'))
-            }
-
-            // 1. Upload to Bucket 'Positions'
-            const uploadResult = await subirArchivoPositions(file, accountId)
-            if (!uploadResult.exito) {
-              return reject(new Error(`Storage error: ${uploadResult.error}`))
-            }
-
-            // 2. Insert into file_uploads history
-            const { data: fileRecord, error: fileRecordError } = await supabase
-              .from('file_uploads')
-              .insert({
-                file_name: file.name,
-                module: 'positions',
-                storage_path: `${accountId}/${file.name}`
-              })
-              .select('id')
-              .single()
-
-            if (fileRecordError) return reject(new Error(`History error: ${fileRecordError.message}`))
-            fileRecordId = fileRecord.id
-
-            // 3. Clear previous snapshot of positions
-            await supabase.from('positions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-
-            // 4. Insert updated positions
-            const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }))
-            const { error: insertError } = await supabase.from('positions').insert(filasConArchivo)
-
-            if (insertError) {
-              if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-              return reject(new Error(`Database error: ${insertError.message}`))
-            }
-
-            resolve(`✅ ${filasProcesadas.length} positions updated`)
-          } catch (err: any) {
-            if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-            reject(err)
-          }
-        }
-      })
-    })
-  }
-
-  // 2. TRANSACTIONS: Bucket "Transactions", storage_path: `Transactions/${accountId}/${file.name}`
-  const procesarTransactions = async (file: File): Promise<string> => {
-    const { data: archivoExistente } = await supabase
-      .from('file_uploads')
-      .select('id')
-      .eq('file_name', file.name)
-      .eq('module', 'transactions')
-      .maybeSingle()
-
-    if (archivoExistente) {
-      throw new Error(`The file "${file.name}" was already uploaded previously.`)
-    }
-
-    const matchAccount = file.name.match(/([A-Z]{3}\d{3})/)
-    const accountId = matchAccount ? matchAccount[1] : 'DESCONOCIDO'
-
-    const csvText = await file.text()
-    const lineas = csvText.split('\n')
-    const lineasLimpias = lineas.map(linea => {
-      let l = linea.trim()
-      if (l.startsWith('"') && l.endsWith('"')) {
-        l = l.substring(1, l.length - 1).replace(/""/g, '"')
-      }
-      return l
-    })
-    const csvLimpio = lineasLimpias.join('\n')
-
-    return new Promise((resolve, reject) => {
-      Papa.parse(csvLimpio, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          let fileRecordId: string | null = null
-          try {
-            const filasProcesadas: any[] = []
-
-            for (const row of results.data as any[]) {
-              const symbolOriginal = row['Symbol'] || row['symbol']
-              if (!symbolOriginal) continue
-
-              let uniqueKey, symbol, instrument: 'Stock' | 'Option'
-              const optionMatch = symbolOriginal.match(/^([A-Z]+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+(\.\d+)?)\s+([CP])$/)
-
-              if (optionMatch) {
-                const ticker = optionMatch[1]
-                const parts = optionMatch[2].split('/')
-                const expiry = `${parts[1]}/${parts[0]}/${parts[2]}`
-                const strike = parseFloat(optionMatch[3])
-                const type = optionMatch[5]
-                uniqueKey = `${ticker}-${expiry} ${strike} ${type}`
-                symbol = ticker
-                instrument = 'Option'
-              } else {
-                uniqueKey = row['unique_key'] || symbolOriginal
-                symbol = row['symbol'] || symbolOriginal
-                instrument = (row['Instrument'] || row['instrument'] || 'Stock') as 'Stock' | 'Option'
-              }
-
-              const realDate = parsearFechaTOS(row['Date'] || row['date'])
-              if (!realDate) continue
-
-              const rawCode = row['trade_code']
-              const parsedCode = rawCode ? parseInt(rawCode.toString().replace(/[^0-9.-]+/g, '')) : null
-              const statusVal = row['position_status'] || row['status'] || 'Open'
-
-              filasProcesadas.push({
-                account_id: accountId,
-                trade_code: isNaN(parsedCode as number) ? null : parsedCode,
-                date: realDate,
-                action: row['Action'] || row['action'],
-                symbol: symbol,
-                instrument: instrument,
-                unique_key: uniqueKey,
-                quantity: (row['Quantity'] || row['quantity']) ? Math.abs(parseFloat((row['Quantity'] || row['quantity']).toString().replace(/[^0-9.-]+/g, ''))) : 0,
-                price: normalizeNumber(row['Price'] || row['price']),
-                fees: normalizeNumber(row['Fees & Comm'] || row['fees'] || row['Fees']),
-                amount: normalizeNumber(row['Amount'] || row['amount']),
-                position_status: statusVal,
-                status: statusVal,
-                strategy_id: row['strategy_id'] ? parseInt(row['strategy_id']) : null,
-                stock_entry_price: instrument === 'Stock' ? normalizeNumber(row['Price'] || row['price']) : (row['stock_entry_price'] ? normalizeNumber(row['stock_entry_price']) : null),
-                description: row['description'] || row['Description'] || null
-              })
-            }
-
-            if (filasProcesadas.length === 0) {
-              return reject(new Error('No valid transaction records found in file.'))
-            }
-
-            // 1. Upload to Bucket 'Transactions'
-            const uploadResult = await subirArchivoOriginal(file, accountId)
-            if (!uploadResult.exito) {
-              return reject(new Error(`Storage error: ${uploadResult.error}`))
-            }
-
-            // 2. Insert into file_uploads with prefix "Transactions/"
-            const { data: fileRecord, error: fileRecordError } = await supabase
-              .from('file_uploads')
-              .insert({
-                file_name: file.name,
-                module: 'transactions',
-                storage_path: `Transactions/${accountId}/${file.name}`
-              })
-              .select('id')
-              .single()
-
-            if (fileRecordError) return reject(new Error(`History error: ${fileRecordError.message}`))
-            fileRecordId = fileRecord.id
-
-            // 3. Insert transaction rows
-            const filasConArchivo = filasProcesadas.map(f => ({
-              ...f,
-              file_upload_id: fileRecord.id
-            }))
-
-            const { error: insertError } = await supabase
-              .from('transactions')
-              .insert(filasConArchivo)
-
-            if (insertError) {
-              if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-              return reject(new Error(`Database error: ${insertError.message}`))
-            }
-
-            resolve(`✅ ${filasProcesadas.length} transactions processed`)
-          } catch (err: any) {
-            if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-            reject(err)
-          }
-        }
-      })
-    })
-  }
-
-  // 3. MK-TOS: Bucket "Mk-tos", storage_path: `${accountId}/${file.name}`, default accountId: 'GENERAL'
-  const procesarMkTos = async (file: File): Promise<string> => {
-    const { data: archivoExistente } = await supabase
-      .from('file_uploads')
-      .select('id')
-      .eq('file_name', file.name)
-      .eq('module', 'mk-tos')
-      .maybeSingle()
-
-    if (archivoExistente) {
-      throw new Error(`The file "${file.name}" was already uploaded previously.`)
-    }
-
-    const matchAccount = file.name.match(/([A-Z]{3}\d{3})/)
-    const accountId = matchAccount ? matchAccount[1] : 'GENERAL'
-
-    const csvText = await file.text()
-    const lineas = csvText.split('\n')
-    const quoteDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0]
-
-    let headerIndex = 0
-    for (let i = 0; i < lineas.length; i++) {
-      if (lineas[i].startsWith('Symbol,Description')) {
-        headerIndex = i
-        break
-      }
-    }
-
-    const lineasUtiles = lineas.slice(headerIndex)
-    const csvLimpio = lineasUtiles.join('\n')
-
-    return new Promise((resolve, reject) => {
-      Papa.parse(csvLimpio, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          let fileRecordId: string | null = null
-          try {
-            const filasProcesadas = procesarFilasMkTos(results.data, quoteDate)
-
-            if (filasProcesadas.length === 0) {
-              return reject(new Error('No valid quote records found in file.'))
-            }
-
-            // 1. Upload to Bucket 'Mk-tos'
-            const uploadResult = await subirArchivoMkTos(file, accountId)
-            if (!uploadResult.exito) {
-              return reject(new Error(`Storage error: ${uploadResult.error}`))
-            }
-
-            // 2. Insert into file_uploads
-            const { data: fileRecord, error: fileRecordError } = await supabase
-              .from('file_uploads')
-              .insert({
-                file_name: file.name,
-                module: 'mk-tos',
-                storage_path: `${accountId}/${file.name}`
-              })
-              .select('id')
-              .single()
-
-            if (fileRecordError) return reject(new Error(`History error: ${fileRecordError.message}`))
-            fileRecordId = fileRecord.id
-
-            // 3. Insert quote rows
-            const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }))
-            const { error: insertError } = await supabase.from('mk_tos_quotes').insert(filasConArchivo)
-
-            if (insertError) {
-              if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-              return reject(new Error(`Database error: ${insertError.message}`))
-            }
-
-            resolve(`✅ ${filasProcesadas.length} symbols processed`)
-          } catch (err: any) {
-            if (fileRecordId) await supabase.from('file_uploads').delete().eq('id', fileRecordId)
-            reject(err)
-          }
-        }
-      })
-    })
-  }
-
-  // --- PROCESS ALL VALID FILES ---
+  // Procesa todos los archivos listos delegando a la capa de aplicación
   const handleProcesarTodo = async () => {
     const modulosParaProcesar = (['positions', 'transactions', 'mk-tos'] as ModuleType[]).filter(
       m => slots[m].file !== null && slots[m].status !== 'duplicate' && slots[m].status !== 'error'
@@ -498,16 +152,24 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
       }))
 
       try {
-        let msg = ''
-        if (modulo === 'positions') msg = await procesarPositions(file)
-        if (modulo === 'transactions') msg = await procesarTransactions(file)
-        if (modulo === 'mk-tos') msg = await procesarMkTos(file)
+        let result
+        if (modulo === 'positions') result = await processPositionsUpload(file, supabase)
+        else if (modulo === 'transactions') result = await processTransactionsUpload(file, supabase)
+        else result = await processMkTosUpload(file, supabase)
 
-        algunExito = true
-        setSlots(prev => ({
-          ...prev,
-          [modulo]: { ...prev[modulo], status: 'success', message: msg }
-        }))
+        if (result.success) {
+          algunExito = true
+          setSlots(prev => ({
+            ...prev,
+            [modulo]: { ...prev[modulo], status: 'success', message: result.message }
+          }))
+        } else {
+          huboError = true
+          setSlots(prev => ({
+            ...prev,
+            [modulo]: { ...prev[modulo], status: 'error', message: `⚠️ ${result.message}` }
+          }))
+        }
       } catch (error: any) {
         huboError = true
         setSlots(prev => ({
@@ -523,7 +185,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
       router.refresh()
     }
 
-    // Si todo se procesó con éxito y sin errores, se cierra automáticamente
+    // Si todo se procesó con éxito y sin errores, cerrar automáticamente en 1 segundo
     if (algunExito && !huboError) {
       setTimeout(() => {
         resetAll()

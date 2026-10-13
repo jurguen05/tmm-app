@@ -4,6 +4,7 @@ import { connection } from 'next/server'
 import UploadMkTosCsv from '../../../components/UploadMkTosCsv'
 import HistorialArchivosMkTos from '../../../components/HistorialArchivosMkTos'
 import MkTosTable from '../../../components/MkTosTable'
+import { getMkTosQuotes } from '../../../services/queries'
 
 export const instant = false
 
@@ -22,9 +23,6 @@ export default async function MkTosPage({ searchParams }: Props) {
   const pageSize = Math.max(10, Math.min(200, parseInt(params?.pageSize || '50', 10)))
   const symbol = (params?.symbol || '').trim()
 
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
-
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,30 +36,14 @@ export default async function MkTosPage({ searchParams }: Props) {
     }
   )
 
-  // Fetching paginado con conteo exacto en el servidor
-  let query = supabase
-    .from('mk_tos_quotes')
-    .select('*, file_uploads!inner(is_archived)', { count: 'exact' })
-    .eq('file_uploads.is_archived', false)
-    .order('quote_date', { ascending: false })
-    .order('symbol', { ascending: true })
-
-  if (symbol) {
-    query = query.ilike('symbol', `%${symbol}%`)
-  }
-
-  const { data: quotes, count, error } = await query.range(from, to)
-
-  if (error) {
-    console.error('Error cargando cotizaciones:', error.message)
-  }
+  const { quotes, count } = await getMkTosQuotes(supabase, { page, pageSize, symbol })
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">MK-TOS</h1>
         <p className="text-gray-600 mt-2">
-          Gestión de archivos Quote con indicadores técnicos.
+          Management of Quote statements with technical indicators.
         </p>
       </div>
 

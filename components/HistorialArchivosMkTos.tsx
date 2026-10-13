@@ -3,15 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { eliminarArchivoMkTos } from '../lib/storage'
-
-interface FileUpload {
-  id: string;
-  file_name: string;
-  storage_path: string;
-  created_at: string;
-  is_archived: boolean;
-}
+import { FileUpload } from '../types'
+import { getFileUploads } from '../services/queries'
+import { deleteUploadedFileCompletely } from '../services/fileUploadService'
 
 export default function HistorialArchivosMkTos() {
   const router = useRouter()
@@ -21,53 +15,42 @@ export default function HistorialArchivosMkTos() {
 
   const cargarArchivos = async () => {
     setCargando(true)
-    const { data, error } = await supabase
-      .from('file_uploads')
-      .select('*')
-      .eq('module', 'mk-tos')
-      .order('created_at', { ascending: false })
-      .limit(3) 
-
-    if (!error && data) {
+    try {
+      const data = await getFileUploads(supabase, 'mk-tos', 3)
       setArchivos(data)
+    } catch (err: any) {
+      console.error('Error fetching MK-TOS uploads:', err.message)
+    } finally {
+      setCargando(false)
     }
-    setCargando(false)
   }
 
-  // Se ejecuta solo al montar.
   useEffect(() => {
     cargarArchivos()
   }, [])
 
-  const handleEliminar = async (id: string, storagePath: string, fileName: string) => {
-    if (!window.confirm(`¿Estás seguro de eliminar "${fileName}"?\n\nEsto borrará permanentemente el archivo y TODAS sus cotizaciones asociadas de la base de datos.`)) {
-      return;
+  const handleEliminar = async (archivo: FileUpload) => {
+    if (!window.confirm(`Are you sure you want to delete "${archivo.file_name}"?\n\nThis will permanently delete the file and ALL its quotes from the database.`)) {
+      return
     }
 
-    setMensaje(`Eliminando "${fileName}"...`)
-
-    const resStorage = await eliminarArchivoMkTos(storagePath);
-    if (!resStorage.exito) {
-      setMensaje(`⚠️ Error al borrar de Storage: ${resStorage.error}`);
-    }
-
-    const { error } = await supabase.from('file_uploads').delete().eq('id', id);
-
-    if (error) {
-      setMensaje(`⚠️ Error al borrar registro: ${error.message}`);
-    } else {
-      setMensaje(`✅ Archivo eliminado correctamente.`);
-      cargarArchivos(); 
-      router.refresh(); // Forzamos la actualización de la tabla principal en el servidor
+    setMensaje(`Deleting "${archivo.file_name}"...`)
+    try {
+      await deleteUploadedFileCompletely(archivo, supabase)
+      setMensaje(`✅ File deleted successfully.`)
+      cargarArchivos()
+      router.refresh()
+    } catch (err: any) {
+      setMensaje(`⚠️ Error deleting file: ${err.message}`)
     }
   }
 
   return (
     <div className="bg-white p-6 rounded-lg shadow border border-gray-200 h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold text-gray-800">File history</h2>
-        <button onClick={cargarArchivos} className="text-sm text-blue-600 hover:text-blue-800">
-          ↻ Actualizar
+        <h2 className="text-xl font-bold text-gray-800">File History</h2>
+        <button onClick={cargarArchivos} className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer">
+          ↻ Refresh
         </button>
       </div>
 
@@ -78,18 +61,18 @@ export default function HistorialArchivosMkTos() {
       )}
 
       {cargando ? (
-        <p className="text-sm text-gray-500">Cargando historial...</p>
+        <p className="text-sm text-gray-500">Loading history...</p>
       ) : archivos.length === 0 ? (
-        <p className="text-sm text-gray-500 italic">No hay archivos importados.</p>
+        <p className="text-sm text-gray-500 italic">No files imported yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Archivo</th>
-                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
-                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Fecha de subida</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Acciones</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">File</th>
+                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Uploaded</th>
+                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -101,11 +84,11 @@ export default function HistorialArchivosMkTos() {
                   <td className="px-4 py-3 text-sm text-center">
                     {archivo.is_archived ? (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        Archivado
+                        Archived
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Activo
+                        Active
                       </span>
                     )}
                   </td>
@@ -114,10 +97,10 @@ export default function HistorialArchivosMkTos() {
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-right space-x-3">
                     <button 
-                      onClick={() => handleEliminar(archivo.id, archivo.storage_path, archivo.file_name)}
-                      className="text-red-600 hover:text-red-900 transition-colors"
+                      onClick={() => handleEliminar(archivo)}
+                      className="text-red-600 hover:text-red-900 transition-colors cursor-pointer"
                     >
-                      Eliminar
+                      Delete
                     </button>
                   </td>
                 </tr>
@@ -129,7 +112,7 @@ export default function HistorialArchivosMkTos() {
       
       {!cargando && archivos.length === 3 && (
         <div className="text-xs text-gray-400 mt-3 text-right italic">
-          Mostrando las 3 subidas más recientes.
+          Showing 3 most recent uploads.
         </div>
       )}
     </div>

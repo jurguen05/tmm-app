@@ -16,30 +16,35 @@ The project enforces a strict separation of concerns across 4 distinct layers:
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
-│                   APPLICATION & BUSINESS LOGIC                  │
+│                   APPLICATION SERVICES LAYER                    │
+│  - services/fileUploadService.ts (Orchestration, safety, rollback)
+│  - services/auth.ts (Authentication and session management)     │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────┐
+│                     DOMAIN & LOGIC LAYER                        │
+│  - lib/transactionsParser.ts (ThinkorSwim transaction parser)   │
 │  - lib/positionsParser.ts (ThinkorSwim statement parsing rules) │
 │  - lib/mkTosParser.ts (Quotes and technical indicators parser)  │
+│  - lib/strategiesCalculator.ts (Financial profitability & stops)│
 │  - lib/formatters.ts (Date ISO normalization, currency, math)   │
+│  - types/index.ts (TypeScript domain models and contracts)      │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────┐
 │                 INFRASTRUCTURE & DATA ACCESS                    │
 │  - lib/supabase.ts (Browser & SSR client configurations)        │
 │  - lib/storage.ts (Supabase Storage buckets operations)         │
-│  - services/queries.tsx (SQL database queries & mutations)      │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────────┐
-│                     DOMAIN & TYPES LAYER                        │
-│  - types/index.tsx (TypeScript interfaces, entities, contracts) │
+│  - services/queries.ts (Central SQL database repository)        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Architectural Principles:
-1. **Single Responsibility:** 
-   * Parsers in `lib/` must be pure functions that transform CSV data without performing network requests or database calls.
-   * Storage helpers in `lib/storage.ts` only manage physical files in Supabase Storage.
-   * Database queries live in `services/queries.tsx` or dedicated server actions.
+1. **Single Responsibility & Pure Domain:** 
+   * Parsers in `lib/` and calculators in `lib/strategiesCalculator.ts` are pure functions that execute without network requests or database calls.
+   * UI components never query Supabase directly; all data access is encapsulated in `services/queries.ts`.
+   * Multi-step file workflows (deduplication, storage upload, DB write, transactional rollback) are orchestrated exclusively by `services/fileUploadService.ts`.
+   * Storage helpers in `lib/storage.ts` only manage physical files in Supabase Storage buckets.
 2. **Server Components First:** 
    * Default to Server Components (`app/**/page.tsx`) for fast server-side fetching and SSR.
    * Use `'use client'` strictly when client-side interactivity, state (`useState`, `useRef`), or browser events are required.

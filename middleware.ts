@@ -36,7 +36,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // 4. Lógica del "Patovica": Si quiere ir al dashboard y no hay usuario, lo rebotamos
+  // 4. Lógica de protección de rutas: Si quiere ir al dashboard y no hay usuario, redirigir a login
   const isDashboardRoute = request.nextUrl.pathname.startsWith('/dashboard')
 
   if (isDashboardRoute && !user) {

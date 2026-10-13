@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import Link from 'next/link'
+import { getDashboardSummaryCounts } from '../../services/queries'
 
 export const instant = false
 
@@ -20,18 +21,12 @@ export default async function DashboardPage() {
     }
   )
 
-  // Fetch summary counts for KPI cards
-  const [
-    { count: positionsCount },
-    { count: transactionsCount },
-    { count: quotesCount },
-    { count: strategiesCount }
-  ] = await Promise.all([
-    supabase.from('positions').select('*', { count: 'exact', head: true }),
-    supabase.from('transactions').select('*', { count: 'exact', head: true }),
-    supabase.from('mk_tos_quotes').select('*', { count: 'exact', head: true }),
-    supabase.from('strategies').select('*', { count: 'exact', head: true }).eq('is_active', true)
-  ])
+  const {
+    positionsCount,
+    transactionsCount,
+    quotesCount,
+    strategiesCount
+  } = await getDashboardSummaryCounts(supabase)
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -49,7 +44,7 @@ export default async function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Positions</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{positionsCount ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{positionsCount}</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
             📊
@@ -60,7 +55,7 @@ export default async function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Transactions</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{transactionsCount ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{transactionsCount}</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
             💳
@@ -71,7 +66,7 @@ export default async function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Market Quotes</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{quotesCount ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{quotesCount}</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
             📈
@@ -82,7 +77,7 @@ export default async function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Active Strategies</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{strategiesCount ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{strategiesCount}</p>
           </div>
           <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
             🎯

@@ -1,6 +1,22 @@
 // lib/formatters.ts
 
-export const formatearMoneda = (valor: number | null | undefined) => {
+/**
+ * Normaliza valores numéricos que puedan venir como strings sucios, con formato de moneda,
+ * comas de miles, signos de porcentaje o cadenas de carga ("loading", "N/A").
+ */
+export const normalizeNumber = (value: string | number | undefined | null): number => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return isNaN(value) ? 0 : value;
+  
+  const str = value.toString().trim();
+  if (!str || str.toLowerCase().includes('loading') || str.toLowerCase() === 'n/a') return 0;
+  
+  const cleanStr = str.replace(/[^0-9.-]+/g, '');
+  const num = parseFloat(cleanStr);
+  return isNaN(num) ? 0 : num;
+};
+
+export const formatearMoneda = (valor: number | null | undefined): string => {
   if (valor === null || valor === undefined) return '0,00';
   
   return new Intl.NumberFormat('es-AR', {
@@ -64,6 +80,6 @@ export const formatearFecha = (fechaTexto: string | null | undefined): string =>
 /**
  * Alias de compatibilidad para formatearFecha
  */
-export const fechaSegura = (fechaTexto: string | null | undefined) => {
+export const fechaSegura = (fechaTexto: string | null | undefined): string => {
   return formatearFecha(fechaTexto);
 };

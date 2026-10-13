@@ -1,12 +1,9 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import Papa from 'papaparse'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { subirArchivoMkTos } from '../lib/storage'
-import { procesarFilasMkTos } from '../lib/mkTosParser'
-import { parsearFechaTOS } from '../lib/formatters'
+import { processMkTosUpload } from '../services/fileUploadService'
 
 export default function UploadMkTosCsv() {
   const router = useRouter()
@@ -19,107 +16,29 @@ export default function UploadMkTosCsv() {
     if (!file) return;
 
     setCargando(true);
-    setMensaje('Verificando archivo...');
+    setMensaje('Processing quote file...');
 
-    const { data: archivoExistente } = await supabase
-      .from('file_uploads')
-      .select('id')
-      .eq('file_name', file.name)
-      .eq('module', 'mk-tos')
-      .maybeSingle();
+    try {
+      const result = await processMkTosUpload(file, supabase);
 
-    if (archivoExistente) {
-      setMensaje(`⚠️ El archivo "${file.name}" ya fue subido. Eliminalo del historial si querés subirlo de nuevo.`);
-      setCargando(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
-
-    setMensaje('Leyendo y limpiando el archivo Quote...');
-
-    const matchAccount = file.name.match(/([A-Z]{3}\d{3})/);
-    const accountId = matchAccount ? matchAccount[1] : 'GENERAL';
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const csvText = event.target?.result as string;
-      const lineas = csvText.split('\n');
-
-      const quoteDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0];
-
-      let headerIndex = 0;
-      for (let i = 0; i < lineas.length; i++) {
-        if (lineas[i].startsWith('Symbol,Description')) {
-          headerIndex = i;
-          break;
-        }
+      if (result.success) {
+        setMensaje(`✅ ${result.message}`);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        router.refresh();
+      } else {
+        setMensaje(`⚠️ ${result.message}`);
       }
-
-      const lineasUtiles = lineas.slice(headerIndex);
-      const csvLimpio = lineasUtiles.join('\n');
-
-      Papa.parse(csvLimpio, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          
-          const filasProcesadas = procesarFilasMkTos(results.data, quoteDate);
-
-          if (filasProcesadas.length > 0) {
-            setMensaje('Guardando archivo físico en bucket Mk-tos...');
-            
-            const uploadResult = await subirArchivoMkTos(file, accountId);
-            if (!uploadResult.exito) {
-              setMensaje(`⚠️ Error al guardar en Storage: ${uploadResult.error}`);
-              setCargando(false);
-              return;
-            }
-
-            setMensaje('Registrando en el historial...');
-            const { data: fileRecord, error: fileRecordError } = await supabase
-              .from('file_uploads')
-              .insert({
-                file_name: file.name,
-                module: 'mk-tos',
-                storage_path: `${accountId}/${file.name}` 
-              })
-              .select('id')
-              .single();
-
-            if (fileRecordError) {
-              setMensaje(`⚠️ Error en historial: ${fileRecordError.message}`);
-              setCargando(false);
-              return;
-            }
-
-            const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
-
-            setMensaje('Insertando cotizaciones...');
-            const { error: insertError } = await supabase.from('mk_tos_quotes').insert(filasConArchivo);
-            
-            if (insertError) {
-              setMensaje('⚠️ Error al insertar cotizaciones: ' + insertError.message);
-            } else {
-              setMensaje(`✅ ¡Éxito! Archivo procesado con ${filasProcesadas.length} símbolos.`);
-              if (fileInputRef.current) fileInputRef.current.value = '';
-              // FORZAMOS LA ACTUALIZACIÓN DEL SERVIDOR
-              router.refresh();
-            }
-          } else {
-            setMensaje('No se encontraron cotizaciones válidas en el CSV.');
-          }
-          setCargando(false);
-        }
-      });
-    };
-    reader.readAsText(file);
+    } catch (err: any) {
+      setMensaje(`⚠️ Unexpected error: ${err.message}`);
+    } finally {
+      setCargando(false);
+    }
   };
 
   return (
-        <div className="bg-white p-6 rounded-lg shadow border border-gray-200 h-full flex flex-col">
+    <div className="bg-white p-6 rounded-lg shadow border border-gray-200 h-full flex flex-col">
       <h2 className="text-xl font-bold mb-4 text-gray-800">MK-TOS (CSV)</h2>
       
-      {/* Este div envuelve el input y el mensaje, usando flex-1 para ocupar el espacio restante y justify-center para centrarse verticalmente */}
       <div className="flex-1 flex flex-col justify-center">
         <input 
           type="file" 

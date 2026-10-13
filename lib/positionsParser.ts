@@ -1,16 +1,34 @@
 // lib/positionsParser.ts
 
-export const normalizeNumber = (value: string | undefined | null) => {
-  if (!value || value.toLowerCase().includes('loading') || value.toLowerCase() === 'n/a') return 0;
-  const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
-  const num = parseFloat(cleanStr);
-  return isNaN(num) ? 0 : num;
-};
+import { normalizeNumber } from './formatters';
 
-export const procesarFilasPosiciones = (csvData: any[], statementDate: string, fileUploadId?: string) => {
-  const filasProcesadas = [];
+export { normalizeNumber };
+
+export interface ParsedPositionRow {
+  statement_date: string;
+  unique_key: string;
+  symbol: string;
+  quantity: number;
+  days: number;
+  trade_price: number;
+  stock_mark: number;
+  stock_last: number;
+  delta_position: number;
+  theta: number;
+  option_delta: number;
+  option_theta: number;
+  net_liq: number;
+  file_upload_id?: string;
+}
+
+export const procesarFilasPosiciones = (
+  csvData: any[],
+  statementDate: string,
+  fileUploadId?: string
+): ParsedPositionRow[] => {
+  const filasProcesadas: ParsedPositionRow[] = [];
   
-  const monthMap: { [key: string]: string } = {
+  const monthMap: Record<string, string> = {
     'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
     'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
   };
@@ -24,7 +42,8 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
     
     if (!symbolOriginal || symbolOriginal.includes('Group') || symbolOriginal.includes('Equities') || symbolOriginal.includes('OVERALL P/L')) continue;
 
-    let uniqueKey, symbol;
+    let uniqueKey = '';
+    let symbol = '';
     let isHeaderRow = false; 
     let isOption = false;
 
@@ -68,10 +87,7 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
       const qty = normalizeNumber(row['Qty']);
       const netLiq = normalizeNumber(row['Net Liq']);
 
-      // ==========================================
-      // EL FILTRO MÁGICO
-      // Si la cantidad es 0 o el Net Liq es 0, ignoramos esta fila
-      // ==========================================
+      // Ignoramos filas con cantidad 0 o Net Liq 0
       if (qty === 0 || netLiq === 0) {
         continue;
       }
@@ -80,7 +96,7 @@ export const procesarFilasPosiciones = (csvData: any[], statementDate: string, f
       const stockMark = isOption && currentStockMark > 0 ? currentStockMark : normalizeNumber(row['Mark']);
       const stockLast = isOption && currentStockLast > 0 ? currentStockLast : normalizeNumber(row['Last']);
 
-      const fila: any = {
+      const fila: ParsedPositionRow = {
         statement_date: statementDate,
         unique_key: uniqueKey,
         symbol: symbol,

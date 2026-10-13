@@ -1,23 +1,43 @@
 // lib/mkTosParser.ts
 
-// Reutilizamos la misma lógica para limpiar números (sacar comas, N/A, etc.)
-export const normalizeNumber = (value: string | undefined | null) => {
-  if (!value || value.toLowerCase().includes('loading') || value.toLowerCase() === 'n/a') return 0;
-  const cleanStr = value.toString().replace(/[^0-9.-]+/g, '');
-  const num = parseFloat(cleanStr);
-  return isNaN(num) ? 0 : num;
-};
+import { normalizeNumber } from './formatters';
 
-export const procesarFilasMkTos = (csvData: any[], quoteDate: string, fileUploadId?: string) => {
-  const filasProcesadas = [];
+export { normalizeNumber };
+
+export interface ParsedMkTosQuoteRow {
+  quote_date: string;
+  symbol: string;
+  description: string;
+  last_price: number;
+  high_52: number;
+  low_52: number;
+  ema: number;
+  low_100_day: number;
+  high_price: number;
+  low_price: number;
+  bollinger_bands: number;
+  sma_10w: number;
+  mac_stop: number;
+  trendpilot_stop: number;
+  sma_10d: number;
+  sma_100d: number;
+  file_upload_id?: string;
+}
+
+export const procesarFilasMkTos = (
+  csvData: any[],
+  quoteDate: string,
+  fileUploadId?: string
+): ParsedMkTosQuoteRow[] => {
+  const filasProcesadas: ParsedMkTosQuoteRow[] = [];
 
   for (const row of csvData) {
     const symbol = row['Symbol'];
     
-    // Ignoramos filas vacías o basura
+    // Ignoramos filas vacías o títulos repetidos
     if (!symbol || symbol.includes('Symbol') || symbol.trim() === '') continue;
 
-    const fila: any = {
+    const fila: ParsedMkTosQuoteRow = {
       quote_date: quoteDate,
       symbol: symbol.trim(),
       description: row['Description']?.trim() || '',
