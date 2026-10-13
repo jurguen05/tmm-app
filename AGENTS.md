@@ -28,3 +28,17 @@ Keep a qualifying candidate through the reporting pass even if you resolve or wo
 Before the final response, run one reporting pass. If candidates remain, from this file's directory run `node node_modules/next/dist/bin/next internal agent-feedback-instructions` once without piping or truncating its output. Follow its output or error guidance. If a network sandbox blocks it, retry with network access; if it still returns no output, continue normally.
 
 <!-- END:nextjs-agent-feedback -->
+
+<!-- BEGIN:tmm-agent-rules -->
+
+## TMM System Architecture & Development Rules
+
+You MUST strictly adhere to all architectural standards, clean architecture layers, anti-hallucination protocols, and risk mitigation rules defined in [DEVELOPMENT.md](DEVELOPMENT.md):
+
+1. **Clean Architecture:** Respect strict layer separation (Presentation in `app/` and `components/`, Domain Logic & Parsers in `lib/`, Data Access & Storage in `lib/supabase.ts`, `lib/storage.ts` and `services/queries.tsx`, Domain Entities in `types/index.tsx`).
+2. **Anti-Hallucination Clause:** Never assume database columns, bucket names, or endpoints. Always verify against Supabase schema, triggers (`assign_transaction_data()`), and types before writing queries or mutations. When ambiguity exists, STOP and verify or ask the user instead of fabricating.
+3. **Risk Management & Git Protection:** For risky changes (database schema migrations, column renames, destructive queries, major multi-module refactors), NEVER commit directly to `main` without proposing an isolated branch (`feature/...` or `refactor/...`) or fork first to keep `main` clean. Always require explicit user confirmation before executing any `git push` to `main`.
+4. **Bucket & Ingestion Protocols:** Respect file deduplication in `file_uploads`, bucket naming (`Positions`, `Transactions`, `Mk-tos`), date ISO strings (`parsearFechaTOS`), numeric normalization, and automatic rollback on DB failure.
+5. **English UI:** Keep all user-facing interface copy in English.
+
+<!-- END:tmm-agent-rules -->
