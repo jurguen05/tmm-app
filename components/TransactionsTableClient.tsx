@@ -20,6 +20,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   const [transacciones, setTransacciones] = useState<Transaction[]>(initialTransactions)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [filtros, setFiltros] = useState({ trade_code: '', symbol: '', strategy: '', status: '' })
+  const [isSearching, setIsSearching] = useState(false)
 
   // Paginación
   const [paginaActual, setPaginaActual] = useState(1)
@@ -40,15 +41,19 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   useEffect(() => {
     if (!hayFiltrosActivos) {
       setTransacciones(initialTransactions)
+      setIsSearching(false)
       return
     }
 
+    setIsSearching(true)
     const timer = setTimeout(async () => {
       try {
         const resultados = await getFilteredTransactions(supabase, filtros)
         setTransacciones(resultados)
       } catch (err: any) {
         console.error('Error buscando transacciones filtradas:', err)
+      } finally {
+        setIsSearching(false)
       }
     }, 250)
 
@@ -213,13 +218,24 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
             </select>
           </div>
 
-          {hayFiltrosActivos && (
-            <button
-              onClick={() => handleFiltroChange({ trade_code: '', symbol: '', strategy: '', status: '' })}
-              className="text-xs text-gray-500 hover:text-indigo-600 underline py-2 cursor-pointer"
-            >
-              Clear filters
-            </button>
+          {hayFiltrosActivos ? (
+            <div className="flex items-center gap-2 py-1">
+              <button
+                onClick={() => handleFiltroChange({ trade_code: '', symbol: '', strategy: '', status: '' })}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer"
+              >
+                Clear filters
+              </button>
+              <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full font-medium">
+                {isSearching ? 'Searching database...' : `${txsFiltradas.length} records found in history`}
+              </span>
+            </div>
+          ) : (
+            <div className="py-1">
+              <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-0.5 rounded-full">
+                Showing latest 50 records (use filters to query full history)
+              </span>
+            </div>
           )}
         </div>
         

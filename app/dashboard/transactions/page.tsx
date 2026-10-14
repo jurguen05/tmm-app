@@ -2,9 +2,9 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import { getUserProfile, getTransactions, getActiveStrategies } from '../../../services/queries'
-import UploadTransactionsCsv from '../../../components/UploadTransactionsCsv'
 import HistorialArchivosTransactions from '../../../components/HistorialArchivosTransactions'
 import TransactionsTableClient from '../../../components/TransactionsTableClient'
+import { formatearFecha } from '../../../lib/formatters'
 
 export const instant = false
 
@@ -30,8 +30,14 @@ export default async function TransactionsPage() {
     return <div>No autorizado</div>
   }
 
-  // 2. Fetching con el cliente SSR inyectado
-  const perfil = await getUserProfile(supabase, user.id)
+  // 2. Ejecutar validación de perfil y fetching en paralelo (últimas 50 transacciones para control visual)
+  const [perfil, transacciones, estrategias] = await Promise.all([
+    getUserProfile(supabase, user.id),
+    getTransactions(supabase, 50),
+    getActiveStrategies(supabase)
+  ])
+
+  const statementDate = transacciones.length > 0 ? transacciones[0].date : null;
 
   if (perfil?.role_id === 2) {
     return (
@@ -46,19 +52,19 @@ export default async function TransactionsPage() {
     )
   }
 
-  // Si es admin (rol 1), traemos los datos
-  const transacciones = await getTransactions(supabase)
-  const estrategias = await getActiveStrategies(supabase)
-
   return (
     <div className="p-8">
       <div className="max-w-[95%] mx-auto">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-800">Transactions</h1>
+          {statementDate && (
+            <p className="text-lg text-gray-600 mt-2">
+              Date: <span className="text-xl font-bold text-indigo-600">{formatearFecha(statementDate)}</span>
+            </p>
+          )}
         </div>
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <UploadTransactionsCsv />
+        <div className="mb-6">
           <HistorialArchivosTransactions />
         </div>
 

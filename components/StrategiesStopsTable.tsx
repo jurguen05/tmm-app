@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import PaginationControls from './PaginationControls'
 import { ConsolidatedStrategyStop, Trade } from '../types'
-import { updateTradeField } from '../services/queries'
+import { updateTradeField, updateTransactionsByTradeCode } from '../services/queries'
 import { supabase } from '../lib/supabase'
 import { formatearFecha } from '../lib/formatters'
 
@@ -52,6 +52,7 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
     if (!confirm(`Are you sure you want to mark trade #${tradeCode} as Closed?`)) return
     try {
       await updateTradeField(supabase, tradeCode, 'status', 'Closed')
+      await updateTransactionsByTradeCode(supabase, tradeCode, 'position_status', 'Closed').catch(() => {})
       setMissingList(prev => prev.filter(t => t.trade_code !== tradeCode))
       router.refresh()
     } catch (err: any) {

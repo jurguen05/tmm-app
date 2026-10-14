@@ -15,7 +15,6 @@ export interface ParsedTransactionRow {
   fees: number;
   amount: number;
   position_status: 'Open' | 'Closed';
-  strategy: string | null;
   strategy_id: number | null;
   stock_entry_price: number | null;
   file_upload_id?: string;
@@ -97,7 +96,6 @@ export const procesarFilasTransacciones = (
       fees: normalizeNumber(row['Fees & Comm'] || row['fees'] || row['Fees']),
       amount: normalizeNumber(row['Amount'] || row['amount']),
       position_status: positionStatus,
-      strategy: row['strategy'] || null,
       strategy_id: row['strategy_id'] ? parseInt(row['strategy_id'], 10) : null,
       stock_entry_price: stockEntryPrice,
       description: row['description'] || row['Description'] || null
@@ -114,13 +112,21 @@ export const procesarFilasTransacciones = (
 };
 
 /**
- * Limpia y prepara el contenido de texto CSV con comillas anidadas antes de ser procesado por PapaParse
+ * Limpia y prepara el contenido de texto CSV antes de ser procesado por PapaParse.
+ * - Remueve BOM (Byte Order Mark) de UTF-8 si está presente.
+ * - Quita comillas envolventes anidadas solo cuando toda la línea viene como una celda
+ *   única de exportación (ej: """...""") y no cuando es un CSV estándar con columnas
+ *   entrecomilladas (donde los campos válidos están separados por '","').
  */
 export const limpiarTextoCsv = (csvText: string): string => {
-  const lineas = csvText.split('\n');
+  if (!csvText) return '';
+  const sinBom = csvText.replace(/^\uFEFF/, '');
+  const lineas = sinBom.split(/\r?\n/);
   const lineasLimpias = lineas.map(linea => {
     let l = linea.trim();
-    if (l.startsWith('"') && l.endsWith('"')) {
+    if (l.startsWith('"""') && l.endsWith('"""')) {
+      l = l.substring(1, l.length - 1).replace(/""/g, '"');
+    } else if (l.startsWith('"') && l.endsWith('"') && l.includes('""') && !l.includes('","')) {
       l = l.substring(1, l.length - 1).replace(/""/g, '"');
     }
     return l;
@@ -129,11 +135,22 @@ export const limpiarTextoCsv = (csvText: string): string => {
 };
 
 /**
- * Extrae el código de cuenta desde el nombre del archivo (ej: "ABC123_transactions.csv" -> "ABC123")
+ * Extrae el código de cuenta desde el nombre del archivo (ej: "Individual_XXX784_Transactions...csv" -> "XXX784")
  */
 export const extraerAccountIdDesdeNombre = (fileName: string, fallback = 'DESCONOCIDO'): string => {
+  // 1. Formato estándar ThinkorSwim: "Individual_XXX784_Transactions_..." o "Individual_12345678_..."
+  const tosMatch = fileName.match(/Individual_([A-Za-z0-9_]+?)_/i);
+  if (tosMatch) return tosMatch[1].toUpperCase();
+
+  // 2. Patrón común de 3 letras + 3 números (ej: "XXX784")
   const matchAccount = fileName.match(/([A-Z]{3}\d{3})/i);
-  return matchAccount ? matchAccount[1].toUpperCase() : fallback;
+  if (matchAccount) return matchAccount[1].toUpperCase();
+
+  // 3. Prefijo al inicio del archivo (ej: "ACC123_transactions.csv")
+  const prefixMatch = fileName.match(/^([A-Za-z0-9]+)[-_]/);
+  if (prefixMatch) return prefixMatch[1].toUpperCase();
+
+  return fallback;
 };
 
 /**

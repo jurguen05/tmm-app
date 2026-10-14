@@ -10,9 +10,11 @@ import {
   getOpenTrades,
   getActiveStrategies,
   updateTradesMaxStockPrices,
-  updateTradesWeekendTraderFlags 
+  updateTradesWeekendTraderFlags,
+  syncTradesForCodes
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
+import { calcularEstadoTradeDesdeTransacciones } from '../../../lib/transactionsParser'
 
 export const instant = false
 
@@ -110,13 +112,15 @@ export default async function StrategiesStopsPage() {
       .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
       .map(c => Number(c.trade_code));
 
-    // Las escrituras corren después de enviar la respuesta para no bloquear el render
-    after(async () => {
-      if (tradesWithMax.length > 0) {
-        await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {})
-      }
-      if (weekendTradesToFlag.length > 0) {
-        await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {})
+    const codesToAutoClose: number[] = []
+
+    // Indexar transacciones por trade_code para evaluar balance neto
+    const txsByTradeCode = new Map<number, typeof prefetchedTxs>()
+    allRelevantTransactions.forEach(t => {
+      if (t.trade_code) {
+        const c = Number(t.trade_code)
+        if (!txsByTradeCode.has(c)) txsByTradeCode.set(c, [])
+        txsByTradeCode.get(c)!.push(t)
       }
     })
 
@@ -131,9 +135,31 @@ export default async function StrategiesStopsPage() {
     )
 
     missingOpenTrades = (openTrades || []).filter(tr => {
+      const c = Number(tr.trade_code)
+      const tradeTxs = txsByTradeCode.get(c) || []
+
+      // Si el historial de transacciones ya muestra que la posición neta es 0, el trade ya fue cerrado
+      if (tradeTxs.length > 0 && calcularEstadoTradeDesdeTransacciones(tradeTxs) === 'Closed') {
+        codesToAutoClose.push(c)
+        return false
+      }
+
       const matchCode = tr.trade_code && activeConsolidatedCodes.has(String(tr.trade_code))
       const matchSymbol = tr.symbol && activePositionSymbols.has(tr.symbol.trim().toUpperCase())
       return !matchCode && !matchSymbol
+    })
+
+    // Las escrituras corren después de enviar la respuesta para no bloquear el render
+    after(async () => {
+      if (tradesWithMax.length > 0) {
+        await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {})
+      }
+      if (weekendTradesToFlag.length > 0) {
+        await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {})
+      }
+      if (codesToAutoClose.length > 0) {
+        await syncTradesForCodes(supabase, codesToAutoClose).catch(() => {})
+      }
     })
   }
 

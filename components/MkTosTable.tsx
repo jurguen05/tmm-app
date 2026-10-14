@@ -32,11 +32,13 @@ interface MkTosTableProps {
   pageSize?: number;
   symbolFilter?: string;
   cargando?: boolean;
+  latestFileName?: string;
+  isFiltered?: boolean;
 }
 
 const formatNumber = (value: number) => {
-  if (value === null || value === undefined) return '0,00';
-  return new Intl.NumberFormat('es-AR', {
+  if (value === null || value === undefined) return '0.00';
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
@@ -48,6 +50,8 @@ export default function MkTosTable({
   currentPage = 1,
   pageSize = 50,
   symbolFilter = '',
+  latestFileName,
+  isFiltered = false,
   cargando = false
 }: MkTosTableProps) {
   const router = useRouter();
@@ -98,7 +102,7 @@ export default function MkTosTable({
   };
 
   if (cargando) {
-    return <div className="text-center p-8 text-gray-500">Cargando cotizaciones...</div>;
+    return <div className="text-center p-8 text-gray-500">Loading quotes...</div>;
   }
 
   const effectiveTotal = totalCount > 0 ? totalCount : quotes.length;
@@ -107,41 +111,54 @@ export default function MkTosTable({
     <div className="space-y-4">
       {/* Barra de Filtros */}
       <div className="bg-white p-4 rounded-lg shadow border border-gray-200 flex flex-wrap items-center justify-between gap-4">
-        <form onSubmit={handleBuscar} className="flex items-center gap-3">
-          <label className="text-xs font-medium text-gray-500">Buscar por Símbolo:</label>
-          <input
-            type="text"
-            placeholder="Ej: AAPL, TSLA, SPY..."
-            value={inputBusqueda}
-            onChange={(e) => setInputBusqueda(e.target.value)}
-            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-48 uppercase"
-          />
-          <button
-            type="submit"
-            disabled={isPending}
-            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            {isPending ? 'Buscando...' : 'Buscar'}
-          </button>
-          {symbolFilter && (
+        <div className="flex flex-wrap items-center gap-3">
+          <form onSubmit={handleBuscar} className="flex items-center gap-2">
+            <label className="text-xs font-medium text-gray-500">Filter by Symbol:</label>
+            <input
+              type="text"
+              placeholder="e.g. AAPL, TSLA, SPY..."
+              value={inputBusqueda}
+              onChange={(e) => setInputBusqueda(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-44 uppercase"
+            />
             <button
-              type="button"
-              onClick={handleLimpiarBusqueda}
-              className="text-xs text-gray-500 hover:text-indigo-600 underline"
+              type="submit"
+              disabled={isPending}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50 cursor-pointer"
             >
-              Limpiar
+              {isPending ? 'Searching...' : 'Search'}
             </button>
-          )}
-        </form>
+            {symbolFilter && (
+              <button
+                type="button"
+                onClick={handleLimpiarBusqueda}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline cursor-pointer ml-1"
+              >
+                Clear
+              </button>
+            )}
+          </form>
+
+          {/* Badge de contexto visual */}
+          {symbolFilter ? (
+            <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full font-medium">
+              Searching entire history for: <strong>{symbolFilter}</strong>
+            </span>
+          ) : latestFileName ? (
+            <span className="text-xs text-gray-600 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full">
+              Visual control: Showing latest file <strong>{latestFileName}</strong>
+            </span>
+          ) : null}
+        </div>
 
         <div className="flex items-center gap-2">
           {isPending && (
             <span className="text-xs text-indigo-600 animate-pulse font-medium">
-              Actualizando...
+              Updating...
             </span>
           )}
           <div className="text-xs text-gray-500 font-medium">
-            {effectiveTotal} {effectiveTotal === 1 ? 'cotización' : 'cotizaciones'} en total
+            {effectiveTotal} {effectiveTotal === 1 ? 'quote' : 'quotes'}
           </div>
         </div>
       </div>
@@ -175,8 +192,8 @@ export default function MkTosTable({
                 <tr>
                   <td colSpan={16} className="px-6 py-8 text-center text-gray-500">
                     {symbolFilter 
-                      ? `No se encontraron cotizaciones para "${symbolFilter}".` 
-                      : 'No hay cotizaciones activas para mostrar. Subí un archivo Quote para empezar.'}
+                      ? `No quotes found matching "${symbolFilter}" across uploaded files.` 
+                      : `No quotes found in latest uploaded file (${latestFileName || 'none'}). Upload a Quotes file to start.`}
                   </td>
                 </tr>
               ) : (
@@ -214,7 +231,7 @@ export default function MkTosTable({
             pageSizeOptions={[25, 50, 100, 200]}
             onPageChange={(page) => updateUrl(page, pageSize, symbolFilter)}
             onPageSizeChange={(newSize) => updateUrl(1, newSize, symbolFilter)}
-            itemName="cotizaciones"
+            itemName="quotes"
           />
         )}
       </div>

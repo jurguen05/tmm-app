@@ -21,28 +21,40 @@ export async function getUserProfile(supabase: SupabaseClient, userId: string): 
   return data;
 }
 
-// 2. Obtener las transacciones iniciales (primeras 1000) vinculadas con la tabla maestra trades
-export async function getTransactions(supabase: SupabaseClient, limit = 1000): Promise<Transaction[]> {
-  const [txRes, tradesRes] = await Promise.all([
-    supabase
-      .from('transactions')
-      .select('*, strategies(name)')
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(limit),
-    supabase
-      .from('trades')
-      .select('*, strategies(name)')
-  ]);
-    
-  if (txRes.error) throw new Error(txRes.error.message);
-  const txs: Transaction[] = txRes.data || [];
-  const trades: Trade[] = tradesRes.data || [];
+// 2. Obtener las transacciones iniciales vinculadas con la tabla maestra trades (50 registros para control visual)
+export async function getTransactions(supabase: SupabaseClient, limit = 50): Promise<Transaction[]> {
+  const { data: txsData, error: txError } = await supabase
+    .from('transactions')
+    .select('*, strategies(name)')
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit);
 
-  if (trades.length === 0) return txs;
+  if (txError) throw new Error(txError.message);
+  const txs: Transaction[] = txsData || [];
+  if (txs.length === 0) return [];
 
-  const tradesMap = new Map<number, Trade>();
-  for (const tr of trades) {
+  // Filtrar solo los trade_codes presentes en las transacciones obtenidas
+  const uniqueCodes = Array.from(new Set(
+    txs
+      .map(t => Number(t.trade_code))
+      .filter((c): c is number => !isNaN(c) && c > 0)
+  ));
+
+  if (uniqueCodes.length === 0) return txs;
+
+  const { data: tradesData, error: tradesError } = await supabase
+    .from('trades')
+    .select('trade_code, strategy_id, status, stock_entry_price, strategies(name)')
+    .in('trade_code', uniqueCodes);
+
+  if (tradesError) {
+    console.warn('[getTransactions] Error fetching trades:', tradesError.message);
+    return txs;
+  }
+
+  const tradesMap = new Map<number, any>();
+  for (const tr of tradesData || []) {
     if (tr.trade_code !== null && tr.trade_code !== undefined && !isNaN(Number(tr.trade_code))) {
       tradesMap.set(Number(tr.trade_code), tr);
     }
@@ -66,16 +78,18 @@ export async function getTransactions(supabase: SupabaseClient, limit = 1000): P
   });
 }
 
-// 2b. Buscar transacciones en el servidor filtradas por código, símbolo, estrategia o estado (sin límite de 1000)
+// 2b. Buscar transacciones en el servidor filtradas por código, símbolo, estrategia o estado trayendo todo el historial
 export async function getFilteredTransactions(
   supabase: SupabaseClient,
-  filters: { trade_code?: string; symbol?: string; strategy?: string; status?: string }
+  filters: { trade_code?: string; symbol?: string; strategy?: string; status?: string },
+  limit = 2000
 ): Promise<Transaction[]> {
   let query = supabase
     .from('transactions')
     .select('*, strategies(name)')
     .order('date', { ascending: false })
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(limit);
 
   if (filters.trade_code && filters.trade_code.trim()) {
     const codeNum = parseInt(filters.trade_code.trim(), 10);
@@ -89,24 +103,65 @@ export async function getFilteredTransactions(
   }
 
   if (filters.status && filters.status.trim() && filters.status.toLowerCase() !== 'all') {
-    query = query.ilike('position_status', filters.status.trim());
+    const statusVal = filters.status.trim();
+    const { data: stTrades } = await supabase
+      .from('trades')
+      .select('trade_code')
+      .ilike('status', statusVal);
+    const stCodes = ((stTrades as any[]) || []).map((t: any) => t.trade_code).filter((c: any): c is number => c !== null && c !== undefined);
+    if (stCodes.length > 0) {
+      query = query.or(`position_status.ilike.${statusVal},trade_code.in.(${stCodes.join(',')})`);
+    } else {
+      query = query.ilike('position_status', statusVal);
+    }
   }
 
-  const [txRes, tradesRes] = await Promise.all([
-    query,
-    supabase
+  if (filters.strategy && filters.strategy.trim() && filters.strategy.toLowerCase() !== 'all') {
+    const stratName = filters.strategy.trim();
+    const { data: stratData } = await supabase
+      .from('strategies')
+      .select('id')
+      .eq('name', stratName)
+      .maybeSingle();
+
+    if (stratData?.id) {
+      const { data: stratTrades } = await supabase
+        .from('trades')
+        .select('trade_code')
+        .eq('strategy_id', stratData.id);
+      const codes = ((stratTrades as any[]) || []).map((t: any) => t.trade_code).filter((c: any): c is number => c !== null && c !== undefined);
+      if (codes.length > 0) {
+        query = query.or(`strategy_id.eq.${stratData.id},trade_code.in.(${codes.join(',')})`);
+      } else {
+        query = query.eq('strategy_id', stratData.id);
+      }
+    }
+  }
+
+  const { data: txsData, error: txError } = await query;
+  if (txError) throw new Error(txError.message);
+  let txs: Transaction[] = txsData || [];
+  if (txs.length === 0) return [];
+
+  const uniqueCodes = Array.from(new Set(
+    txs
+      .map(t => Number(t.trade_code))
+      .filter((c): c is number => !isNaN(c) && c > 0)
+  ));
+
+  let tradesMap = new Map<number, any>();
+  if (uniqueCodes.length > 0) {
+    const { data: tradesData, error: tradesError } = await supabase
       .from('trades')
-      .select('*, strategies(name)')
-  ]);
+      .select('trade_code, strategy_id, status, stock_entry_price, strategies(name)')
+      .in('trade_code', uniqueCodes);
 
-  if (txRes.error) throw new Error(txRes.error.message);
-  let txs: Transaction[] = txRes.data || [];
-  const trades: Trade[] = tradesRes.data || [];
-
-  const tradesMap = new Map<number, Trade>();
-  for (const tr of trades) {
-    if (tr.trade_code !== null && tr.trade_code !== undefined && !isNaN(Number(tr.trade_code))) {
-      tradesMap.set(Number(tr.trade_code), tr);
+    if (!tradesError && tradesData) {
+      for (const tr of tradesData) {
+        if (tr.trade_code !== null && tr.trade_code !== undefined && !isNaN(Number(tr.trade_code))) {
+          tradesMap.set(Number(tr.trade_code), tr);
+        }
+      }
     }
   }
 
@@ -127,7 +182,7 @@ export async function getFilteredTransactions(
     return t;
   });
 
-  if (filters.strategy && filters.strategy.trim() && filters.strategy !== 'All') {
+  if (filters.strategy && filters.strategy.trim() && filters.strategy.toLowerCase() !== 'all') {
     enriched = enriched.filter(t => (t.strategies?.name || t.strategy) === filters.strategy);
   }
 
@@ -200,9 +255,15 @@ export async function deleteTransactionsByFileUploadId(supabase: SupabaseClient,
 export async function insertTransactions(supabase: SupabaseClient, rows: any[]): Promise<void> {
   if (!rows || rows.length === 0) return;
   
+  // Limpiar payload para evitar campos virtuales/UI que no existen en el esquema de la base de datos
+  const cleanRows = rows.map(r => {
+    const { strategy, trade, strategies, codigo, ...dbRow } = r;
+    return dbRow;
+  });
+
   const { error } = await supabase
     .from('transactions')
-    .insert(rows);
+    .insert(cleanRows);
     
   if (error) throw new Error(error.message);
 }
@@ -308,24 +369,50 @@ export async function getFileUploads(
   return data || [];
 }
 
-// 17. Obtener cotizaciones MK-TOS con paginación y filtro de símbolo
+// 17. Obtener cotizaciones MK-TOS: por defecto sólo las del ÚLTIMO archivo cargado (control visual), o de toda la base al filtrar por símbolo
 export async function getMkTosQuotes(
   supabase: SupabaseClient,
   params: { page: number; pageSize: number; symbol?: string }
-): Promise<{ quotes: MkTosQuote[]; count: number }> {
+): Promise<{ quotes: MkTosQuote[]; count: number; latestFileName?: string; isFiltered: boolean }> {
   const { page, pageSize, symbol } = params;
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  const isFiltered = Boolean(symbol && symbol.trim());
+  let latestFileName: string | undefined;
+
   let query = supabase
     .from('mk_tos_quotes')
-    .select('*, file_uploads!inner(is_archived)', { count: 'exact' })
+    .select('*, file_uploads!inner(is_archived, file_name, created_at)', { count: 'exact' })
     .eq('file_uploads.is_archived', false)
     .order('quote_date', { ascending: false })
     .order('symbol', { ascending: true });
 
-  if (symbol && symbol.trim()) {
-    query = query.ilike('symbol', `%${symbol.trim()}%`);
+  if (isFiltered) {
+    // Cuando el usuario usa el filtro por símbolo, busca en todos los archivos cargados históricamente
+    query = query.ilike('symbol', `%${symbol!.trim()}%`);
+  } else {
+    // Sin filtro: control visual exclusivo del ÚLTIMO archivo cargado
+    const { data: latestFile } = await supabase
+      .from('file_uploads')
+      .select('id, file_name')
+      .eq('module', 'mk-tos')
+      .eq('is_archived', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestFile) {
+      latestFileName = latestFile.file_name;
+      query = query.eq('file_upload_id', latestFile.id);
+    } else {
+      return {
+        quotes: [],
+        count: 0,
+        latestFileName: undefined,
+        isFiltered: false
+      };
+    }
   }
 
   const { data, count, error } = await query.range(from, to);
@@ -333,7 +420,9 @@ export async function getMkTosQuotes(
 
   return {
     quotes: data || [],
-    count: count || 0
+    count: count || 0,
+    latestFileName,
+    isFiltered
   };
 }
 

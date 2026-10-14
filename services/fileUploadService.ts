@@ -82,12 +82,13 @@ export async function processPositionsUpload(file: File, supabase: any): Promise
 
   const accountId = extraerAccountIdDesdeNombre(file.name);
   const csvText = await file.text();
-  const lineas = csvText.split('\n');
+  const lineas = csvText.split(/\r?\n/);
   const statementDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0];
 
   let headerIndex = 0;
   for (let i = 0; i < lineas.length; i++) {
-    if (lineas[i].startsWith('Instrument,Qty')) {
+    const cleanLine = lineas[i].replace(/"/g, '').trim();
+    if (cleanLine.startsWith('Instrument,Qty')) {
       headerIndex = i;
       break;
     }
@@ -240,9 +241,17 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
           await insertTransactions(supabase, filasConArchivo);
 
           // 4. Sincronizar tabla trades automáticamente
-          const tradeCodes = filasConArchivo
-            .map(f => f.trade_code)
-            .filter((c): c is number => c !== null && c !== undefined && !isNaN(c));
+          // Obtener los trade_codes reales asignados por el trigger de base de datos
+          const { data: insertedTxs } = await supabase
+            .from('transactions')
+            .select('trade_code')
+            .eq('file_upload_id', fileRecord.id);
+
+          const tradeCodes: number[] = Array.from(new Set<number>(
+            (insertedTxs || [])
+              .map((t: any) => Number(t.trade_code))
+              .filter((c: any): c is number => !isNaN(c) && c > 0)
+          ));
 
           if (tradeCodes.length > 0) {
             await syncTradesForCodes(supabase, tradeCodes, accountId);
@@ -294,12 +303,13 @@ export async function processMkTosUpload(file: File, supabase: any): Promise<Ing
 
   const accountId = extraerAccountIdDesdeNombre(file.name, 'GENERAL');
   const csvText = await file.text();
-  const lineas = csvText.split('\n');
+  const lineas = csvText.split(/\r?\n/);
   const quoteDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file.name) || new Date().toISOString().split('T')[0];
 
   let headerIndex = 0;
   for (let i = 0; i < lineas.length; i++) {
-    if (lineas[i].startsWith('Symbol,Description') || lineas[i].startsWith('Symbol,')) {
+    const cleanLine = lineas[i].replace(/"/g, '').trim();
+    if (cleanLine.startsWith('Symbol,Description') || cleanLine.startsWith('Symbol,')) {
       headerIndex = i;
       break;
     }
@@ -405,6 +415,23 @@ export async function reprocessUploadedFile(fileRecord: FileUpload, supabase: an
             const filasProcesadas = procesarFilasTransacciones(results.data, accountId, id);
             await deleteTransactionsByFileUploadId(supabase, id);
             await insertTransactions(supabase, filasProcesadas);
+
+            // Sincronizar tabla trades automáticamente con los trade_codes asignados
+            const { data: insertedTxs } = await supabase
+              .from('transactions')
+              .select('trade_code')
+              .eq('file_upload_id', id);
+
+            const tradeCodes: number[] = Array.from(new Set<number>(
+              (insertedTxs || [])
+                .map((t: any) => Number(t.trade_code))
+                .filter((c: any): c is number => !isNaN(c) && c > 0)
+            ));
+
+            if (tradeCodes.length > 0) {
+              await syncTradesForCodes(supabase, tradeCodes, accountId);
+            }
+
             resolve({
               success: true,
               module: 'transactions',
@@ -425,12 +452,13 @@ export async function reprocessUploadedFile(fileRecord: FileUpload, supabase: an
     if (!res.exito || !res.data) throw new Error(res.error || 'Failed to download file');
 
     const csvText = await res.data.text();
-    const lineas = csvText.split('\n');
+    const lineas = csvText.split(/\r?\n/);
     const statementDate = parsearFechaTOS(lineas[0]) || parsearFechaTOS(file_name) || new Date().toISOString().split('T')[0];
     
     let headerIndex = 0;
     for (let i = 0; i < lineas.length; i++) {
-      if (lineas[i].startsWith('Instrument,Qty')) {
+      const cleanLine = lineas[i].replace(/"/g, '').trim();
+      if (cleanLine.startsWith('Instrument,Qty')) {
         headerIndex = i;
         break;
       }

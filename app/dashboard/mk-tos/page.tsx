@@ -1,10 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { connection } from 'next/server'
-import UploadMkTosCsv from '../../../components/UploadMkTosCsv'
 import HistorialArchivosMkTos from '../../../components/HistorialArchivosMkTos'
 import MkTosTable from '../../../components/MkTosTable'
 import { getMkTosQuotes } from '../../../services/queries'
+import { formatearFecha } from '../../../lib/formatters'
 
 export const instant = false
 
@@ -36,19 +36,21 @@ export default async function MkTosPage({ searchParams }: Props) {
     }
   )
 
-  const { quotes, count } = await getMkTosQuotes(supabase, { page, pageSize, symbol })
+  const { quotes, count, latestFileName, isFiltered } = await getMkTosQuotes(supabase, { page, pageSize, symbol })
+  const statementDate = quotes.length > 0 ? quotes[0].quote_date : null;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">MK-TOS</h1>
-        <p className="text-gray-600 mt-2">
-          Management of Quote statements with technical indicators.
-        </p>
+        {statementDate && (
+          <p className="text-lg text-gray-600 mt-2">
+            Date: <span className="text-xl font-bold text-indigo-600">{formatearFecha(statementDate)}</span>
+          </p>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <UploadMkTosCsv />
+      <div className="mb-8">
         <HistorialArchivosMkTos />
       </div>
 
@@ -58,6 +60,8 @@ export default async function MkTosPage({ searchParams }: Props) {
         currentPage={page}
         pageSize={pageSize}
         symbolFilter={symbol}
+        latestFileName={latestFileName}
+        isFiltered={isFiltered}
         cargando={false} 
       />
     </div>
