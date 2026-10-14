@@ -2,7 +2,7 @@
 
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
-import { parsearFechaTOS } from '../lib/formatters';
+import { parsearFechaTOS, calcularDiasHabilesDiferencia } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
 
 type SupabaseClient = any;
@@ -1007,8 +1007,14 @@ export async function getStrategiesStopsFreshness(
     }
 
     if (isLatestPos) {
-      posStatus = 'green';
-      posTooltip = 'Positions reflect the latest uploaded statement.';
+      const posBusinessDays = calcularDiasHabilesDiferencia(posDate);
+      if (posBusinessDays >= 2) {
+        posStatus = 'yellow';
+        posTooltip = `Warning: Positions statement is out of date (${posBusinessDays} business days behind). Please upload a recent file.`;
+      } else {
+        posStatus = 'green';
+        posTooltip = 'Positions reflect the latest uploaded statement and are up to date.';
+      }
     } else {
       posStatus = 'yellow';
       posTooltip = 'Viewing an older historical snapshot (not the latest uploaded statement).';
@@ -1029,17 +1035,20 @@ export async function getStrategiesStopsFreshness(
   let mkTooltip = 'No MK-TOS quote data available.';
 
   if (mkDate) {
-    if (posDate && mkDate === posDate) {
-      isSynced = true;
-      mkStatus = 'green';
-      mkTooltip = 'Market quotes are synchronized with the positions date.';
-    } else if (posDate && mkDate !== posDate) {
+    const mkBusinessDays = calcularDiasHabilesDiferencia(mkDate);
+
+    if (posDate && mkDate !== posDate) {
       isSynced = false;
       mkStatus = 'yellow';
       mkTooltip = `Date mismatch: MK-TOS date (${mkDate}) differs from Positions date (${posDate}).`;
+    } else if (mkBusinessDays >= 2) {
+      isSynced = Boolean(posDate && mkDate === posDate);
+      mkStatus = 'yellow';
+      mkTooltip = `Warning: MK-TOS quotes are out of date (${mkBusinessDays} business days behind). Please upload a recent file.`;
     } else {
+      isSynced = true;
       mkStatus = 'green';
-      mkTooltip = `Latest MK-TOS quotes from ${mkDate}.`;
+      mkTooltip = 'Market quotes are up to date and synchronized with positions.';
     }
   }
 

@@ -155,3 +155,58 @@ export const esCierreSemanal = (
 
   return false;
 };
+
+/**
+ * Calcula la cantidad de días hábiles (lunes a viernes) transcurridos
+ * entre una fecha de archivo (fechaISO) y la fecha de referencia (por defecto hoy).
+ * Si fechaISO >= fechaReferencia, retorna 0.
+ */
+export const calcularDiasHabilesDiferencia = (
+  fechaISO: string | null | undefined,
+  fechaReferenciaISO?: string | null | undefined
+): number => {
+  if (!fechaISO) return 0;
+
+  const match1 = fechaISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match1) return 0;
+
+  const y1 = parseInt(match1[1], 10);
+  const m1 = parseInt(match1[2], 10) - 1;
+  const d1 = parseInt(match1[3], 10);
+  const start = new Date(Date.UTC(y1, m1, d1));
+
+  let refDate: Date;
+  if (fechaReferenciaISO) {
+    const match2 = fechaReferenciaISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match2) {
+      refDate = new Date(Date.UTC(parseInt(match2[1], 10), parseInt(match2[2], 10) - 1, parseInt(match2[3], 10)));
+    } else {
+      refDate = new Date();
+    }
+  } else {
+    const now = new Date();
+    const localISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const [ny, nm, nd] = localISO.split('-').map(Number);
+    refDate = new Date(Date.UTC(ny, nm - 1, nd));
+  }
+
+  // Si la fecha del archivo es igual o posterior a la referencia
+  if (start.getTime() >= refDate.getTime()) {
+    return 0;
+  }
+
+  let businessDays = 0;
+  const cur = new Date(start.getTime());
+
+  // Iterar día por día desde el día siguiente al archivo hasta la fecha de referencia inclusive
+  while (cur.getTime() < refDate.getTime()) {
+    cur.setUTCDate(cur.getUTCDate() + 1);
+    const dayOfWeek = cur.getUTCDay();
+    // 0 = Domingo, 6 = Sábado
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      businessDays++;
+    }
+  }
+
+  return businessDays;
+};
