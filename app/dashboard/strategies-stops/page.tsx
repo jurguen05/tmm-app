@@ -13,10 +13,13 @@ import {
   updateTradesWeekendTraderFlags,
   syncTradesForCodes,
   getSpyDailyCloses,
-  autoArchiveOldMkTosFiles
+  autoArchiveOldMkTosFiles,
+  getStrategiesStopsFreshness,
+  FreshnessStatus
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 import { calcularEstadoTradeDesdeTransacciones } from '../../../lib/transactionsParser'
+import { formatearFecha } from '../../../lib/formatters'
 
 export const instant = false
 
@@ -45,6 +48,7 @@ export default async function StrategiesStopsPage() {
   ])
   let consolidado: ReturnType<typeof consolidarStrategiesStops> = []
   let missingOpenTrades: any[] = []
+  let freshness: FreshnessStatus | null = null
 
   if (positions && positions.length > 0) {
     const uniqueKeys = positions.map(p => p.unique_key).filter(Boolean)
@@ -73,12 +77,14 @@ export default async function StrategiesStopsPage() {
         .filter(c => !isNaN(c) && c > 0)
     ))
 
-    // 1. Obtener transacciones vinculadas, cotizaciones MK-TOS e historial de trades abiertos
-    const [initialTxs, mkTosQuotes, prefetchedTxs] = await Promise.all([
+    // 1. Obtener transacciones vinculadas, cotizaciones MK-TOS, historial de trades y frescura de archivos en paralelo
+    const [initialTxs, mkTosQuotes, prefetchedTxs, freshnessData] = await Promise.all([
       getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)),
       getLatestMkTosQuotes(supabase, symbols),
-      getTransactionsByTradeCodes(supabase, prefetchedCodes)
+      getTransactionsByTradeCodes(supabase, prefetchedCodes),
+      getStrategiesStopsFreshness(supabase, positions).catch(() => null)
     ])
+    freshness = freshnessData
 
     // 2. Solo si hay trade_codes activos que no estaban pre-cargados, traerlos (fallback)
     const prefetchedSet = new Set(prefetchedCodes)
@@ -172,13 +178,59 @@ export default async function StrategiesStopsPage() {
     })
   }
 
+  if (!freshness) {
+    freshness = await getStrategiesStopsFreshness(supabase, positions).catch(() => null)
+  }
+
+  const getDotClass = (status?: 'green' | 'yellow' | 'gray') => {
+    switch (status) {
+      case 'green':
+        return 'bg-emerald-500 ring-2 ring-emerald-200'
+      case 'yellow':
+        return 'bg-amber-400 ring-2 ring-amber-200'
+      default:
+        return 'bg-gray-300 ring-2 ring-gray-100'
+    }
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Strategies Stops</h1>
-        <p className="text-gray-600 mt-2">
-          Daily Review: Active positions, stops and profitability.
-        </p>
+
+        {freshness && (
+          <div className="mt-3 flex flex-wrap items-center gap-6 text-sm">
+            {/* Positions */}
+            <div 
+              className="flex items-center gap-2 cursor-default select-none"
+              title={freshness.positions.tooltip}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${getDotClass(freshness.positions.status)}`} />
+              <span className="text-gray-600 font-medium">Positions:</span>
+              <span className="font-bold text-gray-900">{formatearFecha(freshness.positions.date) || '-'}</span>
+            </div>
+
+            {/* MK-TOS */}
+            <div 
+              className="flex items-center gap-2 cursor-default select-none"
+              title={freshness.mkTos.tooltip}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${getDotClass(freshness.mkTos.status)}`} />
+              <span className="text-gray-600 font-medium">MK-TOS:</span>
+              <span className="font-bold text-gray-900">{formatearFecha(freshness.mkTos.date) || '-'}</span>
+            </div>
+
+            {/* Transactions */}
+            <div 
+              className="flex items-center gap-2 cursor-default select-none"
+              title={freshness.transactions.tooltip}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${getDotClass(freshness.transactions.status)}`} />
+              <span className="text-gray-600 font-medium">Transactions:</span>
+              <span className="font-bold text-gray-900">{formatearFecha(freshness.transactions.date) || '-'}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <StrategiesStopsTable datos={consolidado} cargando={false} missingTrades={missingOpenTrades} />

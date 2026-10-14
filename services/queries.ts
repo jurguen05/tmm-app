@@ -928,4 +928,160 @@ export async function updateTradesWeekendTraderFlags(
   }
 }
 
+// 31. Obtener estado de frescura y sincronización de archivos para Strategies Stops
+export interface FreshnessStatus {
+  positions: {
+    date: string | null;
+    isLatest: boolean;
+    status: 'green' | 'yellow' | 'gray';
+    tooltip: string;
+  };
+  mkTos: {
+    date: string | null;
+    isSynced: boolean;
+    status: 'green' | 'yellow' | 'gray';
+    tooltip: string;
+  };
+  transactions: {
+    date: string | null;
+    isAhead: boolean;
+    status: 'green' | 'yellow' | 'gray';
+    tooltip: string;
+  };
+}
+
+export async function getStrategiesStopsFreshness(
+  supabase: SupabaseClient,
+  activePositions: Position[]
+): Promise<FreshnessStatus> {
+  const [latestPosUpload, latestMkTosUpload, latestTxRow, latestQuoteRow] = await Promise.all([
+    supabase
+      .from('file_uploads')
+      .select('id, file_name, created_at')
+      .eq('module', 'positions')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('file_uploads')
+      .select('id, file_name, created_at')
+      .eq('module', 'mk-tos')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('transactions')
+      .select('date')
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('mk_tos_quotes')
+      .select('quote_date')
+      .order('quote_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ]);
+
+  const activePos = activePositions && activePositions.length > 0 ? activePositions[0] : null;
+  const posDate = activePos ? (parsearFechaTOS(activePos.statement_date) || activePos.statement_date?.substring(0, 10)) : null;
+  
+  // 1. Positions Status
+  let posStatus: 'green' | 'yellow' | 'gray' = 'gray';
+  let isLatestPos = false;
+  let posTooltip = 'No positions loaded.';
+
+  if (activePos && posDate) {
+    const latestPosFile = latestPosUpload?.data;
+    if (latestPosFile) {
+      if (activePos.file_upload_id && activePos.file_upload_id === latestPosFile.id) {
+        isLatestPos = true;
+      } else {
+        const latestDateInName = parsearFechaTOS(latestPosFile.file_name);
+        if (latestDateInName && latestDateInName === posDate) {
+          isLatestPos = true;
+        }
+      }
+    } else {
+      isLatestPos = true;
+    }
+
+    if (isLatestPos) {
+      posStatus = 'green';
+      posTooltip = 'Positions reflect the latest uploaded statement.';
+    } else {
+      posStatus = 'yellow';
+      posTooltip = 'Viewing an older historical snapshot (not the latest uploaded statement).';
+    }
+  }
+
+  // 2. MK-TOS Status
+  let mkDate = latestQuoteRow?.data?.quote_date 
+    ? (parsearFechaTOS(latestQuoteRow.data.quote_date) || latestQuoteRow.data.quote_date?.substring(0, 10)) 
+    : null;
+    
+  if (!mkDate && latestMkTosUpload?.data?.file_name) {
+    mkDate = parsearFechaTOS(latestMkTosUpload.data.file_name);
+  }
+
+  let mkStatus: 'green' | 'yellow' | 'gray' = 'gray';
+  let isSynced = false;
+  let mkTooltip = 'No MK-TOS quote data available.';
+
+  if (mkDate) {
+    if (posDate && mkDate === posDate) {
+      isSynced = true;
+      mkStatus = 'green';
+      mkTooltip = 'Market quotes are synchronized with the positions date.';
+    } else if (posDate && mkDate !== posDate) {
+      isSynced = false;
+      mkStatus = 'yellow';
+      mkTooltip = `Date mismatch: MK-TOS date (${mkDate}) differs from Positions date (${posDate}).`;
+    } else {
+      mkStatus = 'green';
+      mkTooltip = `Latest MK-TOS quotes from ${mkDate}.`;
+    }
+  }
+
+  // 3. Transactions Status
+  const txRawDate = latestTxRow?.data?.date;
+  const txDate = txRawDate ? (parsearFechaTOS(txRawDate) || txRawDate?.substring(0, 10)) : null;
+
+  let txStatus: 'green' | 'yellow' | 'gray' = 'gray';
+  let isAhead = false;
+  let txTooltip = 'No transactions recorded.';
+
+  if (txDate) {
+    if (posDate && txDate > posDate) {
+      isAhead = true;
+      txStatus = 'yellow';
+      txTooltip = `Notice: Transactions date (${txDate}) is newer than current Positions date (${posDate}).`;
+    } else {
+      txStatus = 'green';
+      txTooltip = `Transactions are up to date relative to positions (last trade date: ${txDate}).`;
+    }
+  }
+
+  return {
+    positions: {
+      date: posDate,
+      isLatest: isLatestPos,
+      status: posStatus,
+      tooltip: posTooltip
+    },
+    mkTos: {
+      date: mkDate,
+      isSynced: isSynced,
+      status: mkStatus,
+      tooltip: mkTooltip
+    },
+    transactions: {
+      date: txDate,
+      isAhead: isAhead,
+      status: txStatus,
+      tooltip: txTooltip
+    }
+  };
+}
+
 
