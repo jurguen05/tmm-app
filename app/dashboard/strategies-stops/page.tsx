@@ -11,7 +11,8 @@ import {
   getActiveStrategies,
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
-  syncTradesForCodes
+  syncTradesForCodes,
+  getSpyDailyCloses
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 import { calcularEstadoTradeDesdeTransacciones } from '../../../lib/transactionsParser'
@@ -34,10 +35,12 @@ export default async function StrategiesStopsPage() {
   )
 
   // Independientes de positions: se lanzan en paralelo
-  const [positions, openTrades, activeStrategies] = await Promise.all([
+  const [positions, openTrades, activeStrategies, spyCloses] = await Promise.all([
     getPositions(supabase),
     getOpenTrades(supabase),
-    getActiveStrategies(supabase).catch(() => [])
+    getActiveStrategies(supabase).catch(() => []),
+    // Historial persistido de SPY vs SMA 10W (si la tabla aún no existe, se usa SPY de mk_tos_quotes)
+    getSpyDailyCloses(supabase).catch(() => [])
   ])
   let consolidado: ReturnType<typeof consolidarStrategiesStops> = []
   let missingOpenTrades: any[] = []
@@ -95,7 +98,7 @@ export default async function StrategiesStopsPage() {
     extraTxs.forEach(t => txMap.set(t.id, t))
     const allRelevantTransactions = Array.from(txMap.values())
 
-    consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades, activeStrategies)
+    consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades, activeStrategies, spyCloses)
 
     // Persistir max_stock_price, max_stock_price_date y weekend_trader_flag en la tabla trades
     const tradesWithMax = consolidado

@@ -1,6 +1,6 @@
 // services/queries.ts
 
-import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade } from '../types';
+import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
 import { parsearFechaTOS } from '../lib/formatters';
 
@@ -516,6 +516,29 @@ export async function getLatestMkTosQuotes(
       if (rows.length < MK_TOS_PAGE_SIZE) return all;
     }
   }
+}
+
+// 21b. Registrar (o actualizar) el cierre diario de SPY vs SMA 10W para el filtro de mercado de Weekend Trader
+export async function upsertSpyDailyClose(
+  supabase: SupabaseClient,
+  row: { quote_date: string; spy_last: number; spy_sma_10w: number; file_upload_id?: string | null }
+): Promise<void> {
+  const { error } = await supabase
+    .from('spy_daily_closes')
+    .upsert(row, { onConflict: 'quote_date' });
+
+  if (error) throw new Error(error.message);
+}
+
+// 21c. Obtener el historial de cierres diarios de SPY (independiente de los archivos MK-TOS archivados)
+export async function getSpyDailyCloses(supabase: SupabaseClient): Promise<SpyDailyClose[]> {
+  const { data, error } = await supabase
+    .from('spy_daily_closes')
+    .select('quote_date, spy_last, spy_sma_10w, is_red, file_upload_id')
+    .order('quote_date', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 // 22. Obtener todas las transacciones asociadas a una lista de trade_codes

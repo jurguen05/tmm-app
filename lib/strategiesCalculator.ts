@@ -1,6 +1,6 @@
 // lib/strategiesCalculator.ts
 
-import { Position, Transaction, MkTosQuote, ConsolidatedStrategyStop, Trade, Strategy } from '../types';
+import { Position, Transaction, MkTosQuote, ConsolidatedStrategyStop, Trade, Strategy, SpyDailyClose } from '../types';
 import { normalizeUniqueKey, esViernes, esCierreSemanal, parsearFechaTOS } from './formatters';
 
 export type { ConsolidatedStrategyStop };
@@ -100,7 +100,8 @@ export const consolidarStrategiesStops = (
   transactions: Transaction[],
   mkTosQuotes?: MkTosQuote[],
   trades?: Trade[],
-  strategiesList?: Strategy[]
+  strategiesList?: Strategy[],
+  spyCloses?: SpyDailyClose[]
 ): ConsolidatedStrategyStop[] => {
   if (!positions || positions.length === 0) return [];
 
@@ -143,10 +144,24 @@ export const consolidarStrategiesStops = (
     }
   }
 
-  // Obtener y analizar cotizaciones de SPY ordenadas por fecha descendente para Weekend Trader
-  const spyQuotes = (allQuotesBySymbol.get('SPY') || [])
-    .slice()
-    .sort((a, b) => (b.quote_date || '').localeCompare(a.quote_date || ''));
+  // Obtener y analizar cotizaciones de SPY ordenadas por fecha descendente para Weekend Trader.
+  // Fuente principal: tabla spy_daily_closes (sobrevive al archivado de MK-TOS).
+  // Respaldo: cotizaciones de SPY en archivos MK-TOS activos (transición o si falló el registro al subir).
+  const spyByDate = new Map<string, { quote_date: string; last_price: number; sma_10w: number }>();
+  for (const q of allQuotesBySymbol.get('SPY') || []) {
+    const d = parsearFechaTOS(q.quote_date) || q.quote_date?.substring(0, 10);
+    if (d && !spyByDate.has(d)) {
+      spyByDate.set(d, { quote_date: d, last_price: q.last_price, sma_10w: q.sma_10w });
+    }
+  }
+  for (const sc of spyCloses || []) {
+    const d = parsearFechaTOS(sc.quote_date) || sc.quote_date?.substring(0, 10);
+    if (d) {
+      spyByDate.set(d, { quote_date: d, last_price: Number(sc.spy_last), sma_10w: Number(sc.spy_sma_10w) });
+    }
+  }
+  const spyQuotes = Array.from(spyByDate.values())
+    .sort((a, b) => b.quote_date.localeCompare(a.quote_date));
 
   const spyDatesSet = new Set(
     spyQuotes

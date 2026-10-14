@@ -21,6 +21,7 @@ import {
   insertPositions, 
   insertTransactions, 
   insertMkTosQuotes,
+  upsertSpyDailyClose,
   deletePositionsByFileUploadId,
   deleteTransactionsByFileUploadId,
   deleteMkTosQuotesByFileUploadId,
@@ -364,12 +365,32 @@ export async function processMkTosUpload(file: File, supabase: any): Promise<Ing
           const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
           await insertMkTosQuotes(supabase, filasConArchivo);
 
+          // 4. Registrar SPY vs SMA 10W en spy_daily_closes (historial del filtro de mercado de Weekend Trader).
+          //    No es bloqueante: si falla, las cotizaciones ya quedaron cargadas y el calculador usa SPY de mk_tos_quotes.
+          let spyWarning = '';
+          const spyRow = filasProcesadas.find(f => (f.symbol || '').trim().toUpperCase() === 'SPY');
+          if (spyRow && spyRow.last_price > 0 && spyRow.sma_10w > 0) {
+            try {
+              await upsertSpyDailyClose(supabase, {
+                quote_date: spyRow.quote_date,
+                spy_last: spyRow.last_price,
+                spy_sma_10w: spyRow.sma_10w,
+                file_upload_id: fileRecord.id
+              });
+            } catch (spyErr: any) {
+              console.warn('[processMkTosUpload] Could not save SPY daily close:', spyErr.message);
+              spyWarning = ' (Warning: SPY market filter history was not saved)';
+            }
+          } else {
+            spyWarning = ' (Warning: SPY row with Last and SMA 10W not found in this file)';
+          }
+
           resolve({
             success: true,
             module: 'mk-tos',
             fileName: file.name,
             count: filasProcesadas.length,
-            message: `Successfully processed ${filasProcesadas.length} quote records.`
+            message: `Successfully processed ${filasProcesadas.length} quote records.${spyWarning}`
           });
         } catch (err: any) {
           // Rollback transaccional

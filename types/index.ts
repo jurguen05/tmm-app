@@ -106,6 +106,15 @@ export interface MkTosQuote {
   file_upload_id?: string;
 }
 
+/** Fila de la tabla spy_daily_closes: SPY Last vs SMA 10W por fecha de cotización (filtro de mercado de Weekend Trader) */
+export interface SpyDailyClose {
+  quote_date: string;
+  spy_last: number;
+  spy_sma_10w: number;
+  is_red?: boolean;
+  file_upload_id?: string | null;
+}
+
 export interface ConsolidatedStrategyStop {
   id: string;
   trade_code: string;
