@@ -985,8 +985,17 @@ export async function getStrategiesStopsFreshness(
 
   const activePos = activePositions && activePositions.length > 0 ? activePositions[0] : null;
   const posDate = activePos ? (parsearFechaTOS(activePos.statement_date) || activePos.statement_date?.substring(0, 10)) : null;
+
+  // Fecha del último archivo de cotizaciones MK-TOS
+  let mkDate = latestQuoteRow?.data?.quote_date 
+    ? (parsearFechaTOS(latestQuoteRow.data.quote_date) || latestQuoteRow.data.quote_date?.substring(0, 10)) 
+    : null;
+    
+  if (!mkDate && latestMkTosUpload?.data?.file_name) {
+    mkDate = parsearFechaTOS(latestMkTosUpload.data.file_name);
+  }
   
-  // 1. Positions Status
+  // 1. Positions Status (con simetría si se sube MK-TOS primero)
   let posStatus: 'green' | 'yellow' | 'gray' = 'gray';
   let isLatestPos = false;
   let posTooltip = 'No positions loaded.';
@@ -1006,30 +1015,25 @@ export async function getStrategiesStopsFreshness(
       isLatestPos = true;
     }
 
-    if (isLatestPos) {
-      const posBusinessDays = calcularDiasHabilesDiferencia(posDate);
-      if (posBusinessDays >= 2) {
-        posStatus = 'yellow';
-        posTooltip = `Warning: Positions statement is out of date (${posBusinessDays} business days behind). Please upload a recent file.`;
-      } else {
-        posStatus = 'green';
-        posTooltip = 'Positions reflect the latest uploaded statement and are up to date.';
-      }
-    } else {
+    const posBusinessDays = calcularDiasHabilesDiferencia(posDate);
+
+    if (!isLatestPos) {
       posStatus = 'yellow';
       posTooltip = 'Viewing an older historical snapshot (not the latest uploaded statement).';
+    } else if (posBusinessDays >= 2) {
+      posStatus = 'yellow';
+      posTooltip = `Warning: Positions statement is out of date (${posBusinessDays} business days behind). Please upload a recent file.`;
+    } else if (mkDate && mkDate > posDate) {
+      // Simetría: Si subiste primero MK-TOS con fecha más nueva, Positions queda en amarillo avisando que falta subir la foto de hoy
+      posStatus = 'yellow';
+      posTooltip = `Notice: Positions (${posDate}) is lagging behind MK-TOS (${mkDate}). Please upload today's Positions file.`;
+    } else {
+      posStatus = 'green';
+      posTooltip = 'Positions reflect the latest uploaded statement and are up to date.';
     }
   }
 
-  // 2. MK-TOS Status
-  let mkDate = latestQuoteRow?.data?.quote_date 
-    ? (parsearFechaTOS(latestQuoteRow.data.quote_date) || latestQuoteRow.data.quote_date?.substring(0, 10)) 
-    : null;
-    
-  if (!mkDate && latestMkTosUpload?.data?.file_name) {
-    mkDate = parsearFechaTOS(latestMkTosUpload.data.file_name);
-  }
-
+  // 2. MK-TOS Status (con simetría si se sube Positions primero)
   let mkStatus: 'green' | 'yellow' | 'gray' = 'gray';
   let isSynced = false;
   let mkTooltip = 'No MK-TOS quote data available.';
@@ -1037,14 +1041,15 @@ export async function getStrategiesStopsFreshness(
   if (mkDate) {
     const mkBusinessDays = calcularDiasHabilesDiferencia(mkDate);
 
-    if (posDate && mkDate !== posDate) {
-      isSynced = false;
-      mkStatus = 'yellow';
-      mkTooltip = `Date mismatch: MK-TOS date (${mkDate}) differs from Positions date (${posDate}).`;
-    } else if (mkBusinessDays >= 2) {
+    if (mkBusinessDays >= 2) {
       isSynced = Boolean(posDate && mkDate === posDate);
       mkStatus = 'yellow';
       mkTooltip = `Warning: MK-TOS quotes are out of date (${mkBusinessDays} business days behind). Please upload a recent file.`;
+    } else if (posDate && posDate > mkDate) {
+      // Simetría: Si subiste primero Positions con fecha más nueva, MK-TOS queda en amarillo avisando que falta subir las cotizaciones de hoy
+      isSynced = false;
+      mkStatus = 'yellow';
+      mkTooltip = `Notice: MK-TOS quotes (${mkDate}) are lagging behind Positions (${posDate}). Please upload today's MK-TOS file.`;
     } else {
       isSynced = true;
       mkStatus = 'green';
