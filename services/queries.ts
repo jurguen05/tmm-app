@@ -3,6 +3,7 @@
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
 import { parsearFechaTOS } from '../lib/formatters';
+import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
 
 type SupabaseClient = any;
 
@@ -541,6 +542,73 @@ export async function getSpyDailyCloses(supabase: SupabaseClient): Promise<SpyDa
   return data || [];
 }
 
+// 21d. Listar archivos MK-TOS activos (no archivados) con su fecha de cotización.
+// Todas las filas de un archivo comparten quote_date, así que alcanza con leer una fila por archivo.
+export async function getActiveMkTosFilesWithDate(
+  supabase: SupabaseClient
+): Promise<{ id: string; quote_date: string | null }[]> {
+  const { data: files, error } = await supabase
+    .from('file_uploads')
+    .select('id')
+    .eq('module', 'mk-tos')
+    .eq('is_archived', false);
+
+  if (error) throw new Error(error.message);
+  if (!files || files.length === 0) return [];
+
+  return Promise.all(
+    files.map(async (f: { id: string }) => {
+      const { data, error: qErr } = await supabase
+        .from('mk_tos_quotes')
+        .select('quote_date')
+        .eq('file_upload_id', f.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (qErr) throw new Error(qErr.message);
+      const raw = data?.quote_date as string | undefined;
+      return { id: f.id, quote_date: raw ? (parsearFechaTOS(raw) || raw.substring(0, 10)) : null };
+    })
+  );
+}
+
+// 21e. Marcar archivos como archivados (reversible: is_archived = false los reactiva).
+// Devuelve cuántos se archivaron: si RLS bloquea el UPDATE, PostgREST no da error sino 0 filas.
+export async function archiveFileUploads(supabase: SupabaseClient, ids: string[]): Promise<number> {
+  if (!ids || ids.length === 0) return 0;
+
+  const { data, error } = await supabase
+    .from('file_uploads')
+    .update({ is_archived: true })
+    .in('id', ids)
+    .select('id');
+
+  if (error) throw new Error(error.message);
+  return data?.length ?? 0;
+}
+
+// 21f. Ejecutar archivado automático de archivos MK-TOS antiguos manteniendo los últimos N días de cotización (por defecto 10)
+export async function autoArchiveOldMkTosFiles(
+  supabase: SupabaseClient,
+  keepDates: number = MK_TOS_ACTIVE_QUOTE_DATES
+): Promise<{ checked: number; archived: number }> {
+  try {
+    const files = await getActiveMkTosFilesWithDate(supabase);
+    const toArchiveIds = seleccionarArchivosMkTosParaArchivar(files, keepDates);
+    
+    if (toArchiveIds.length === 0) {
+      return { checked: files.length, archived: 0 };
+    }
+
+    const count = await archiveFileUploads(supabase, toArchiveIds);
+    console.log(`[autoArchiveOldMkTosFiles] Automatically archived ${count} old MK-TOS files.`);
+    return { checked: files.length, archived: count };
+  } catch (err: any) {
+    console.warn('[autoArchiveOldMkTosFiles] Error executing auto-archive:', err.message);
+    return { checked: 0, archived: 0 };
+  }
+}
+
 // 22. Obtener todas las transacciones asociadas a una lista de trade_codes
 export async function getTransactionsByTradeCodes(
   supabase: SupabaseClient,
@@ -816,8 +884,9 @@ export async function updateTradesMaxStockPrices(
     max_stock_price_date: string | null;
     weekend_trader_flag?: boolean;
   }[]
-): Promise<void> {
-  if (!items || items.length === 0) return;
+): Promise<number> {
+  if (!items || items.length === 0) return 0;
+  let failed = 0;
   await Promise.all(items.map(async (item) => {
     try {
       const payload: any = {
@@ -827,15 +896,19 @@ export async function updateTradesMaxStockPrices(
       if (item.weekend_trader_flag === true) {
         payload.weekend_trader_flag = true;
       }
-      await supabase
+      const { error } = await supabase
         .from('trades')
         .update(payload)
         .eq('trade_code', item.trade_code)
         .eq('status', 'Open');
+      if (error) failed++;
     } catch {
       // Fallback seguro si la columna aún no está creada en DB
+      failed++;
     }
   }));
+  // Devuelve la cantidad de actualizaciones fallidas (el archivado automático solo corre si es 0)
+  return failed;
 }
 
 // 30. Actualizar permanentemente weekend_trader_flag a true para trades abiertos

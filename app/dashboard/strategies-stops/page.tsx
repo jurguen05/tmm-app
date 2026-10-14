@@ -12,7 +12,8 @@ import {
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
   syncTradesForCodes,
-  getSpyDailyCloses
+  getSpyDailyCloses,
+  autoArchiveOldMkTosFiles
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 import { calcularEstadoTradeDesdeTransacciones } from '../../../lib/transactionsParser'
@@ -154,14 +155,19 @@ export default async function StrategiesStopsPage() {
 
     // Las escrituras corren después de enviar la respuesta para no bloquear el render
     after(async () => {
+      let maxUpdatesFailed = 0
       if (tradesWithMax.length > 0) {
-        await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => {})
+        maxUpdatesFailed = await updateTradesMaxStockPrices(supabase, tradesWithMax).catch(() => 1)
       }
       if (weekendTradesToFlag.length > 0) {
         await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {})
       }
       if (codesToAutoClose.length > 0) {
         await syncTradesForCodes(supabase, codesToAutoClose).catch(() => {})
+      }
+      // Solo archivar automáticamente si la persistencia de picos no tuvo errores
+      if (maxUpdatesFailed === 0) {
+        await autoArchiveOldMkTosFiles(supabase).catch(() => {})
       }
     })
   }
