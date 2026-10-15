@@ -4,9 +4,10 @@
  * Política de archivado automático de archivos MK-TOS.
  *
  * Fundamento (ver STRATEGIES_STOPS.md):
- * - Tech Trader, Trend Pilot, MAC, New Yearly Highs, 100-day-High, BBO y Hedge
+ * - Tech Trader, Trend Pilot, MAC, BBO y Hedge
  *   usan solo la cotización más reciente (los indicadores ya vienen calculados por TOS).
  * - 20% Flipper y Weekend Trader persisten su pico en trades.max_stock_price.
+ * - New Yearly Highs y 100-day-High persisten su stop trinquete (ratchet) en trades.ratchet_stop.
  * - El filtro de mercado de Weekend Trader (SPY vs SMA 10W) persiste en spy_daily_closes.
  *
  * Por lo tanto solo hace falta mantener activa una ventana corta de fechas de cotización.

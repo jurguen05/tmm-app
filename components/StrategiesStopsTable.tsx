@@ -525,10 +525,13 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
                 </div>
                 <div className="text-xs text-gray-700 space-y-1.5">
                   <p>
-                    <strong>Stop Value:</strong> <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 text-amber-800">52-Week Low (52Low)</code> (Extracted from the 52Low column in MK-TOS, representing the 250-trading-day minimum).
+                    <strong>Ratchet Trailing Stop:</strong> Tracks the highest <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 text-amber-800">52-Week Low (52Low)</code> recorded from <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 text-amber-800">first_buy_date</code> to present. Strictly increasing (trailing) trinquete: if 52Low rises, the stop rises; if it drops or fluctuates, the previous highest stop is preserved and never steps down.
                   </p>
                   <p>
-                    🔴 <strong>Red Badge Alert:</strong> When <code className="bg-white px-1 rounded border border-amber-200 text-amber-800">Last Price &lt; Stop</code> (stock closes below the 52-week low), the Stop value is displayed with a <span className="bg-red-100 text-red-800 border border-red-300 px-1.5 py-0.5 rounded font-bold">Red Badge</span>.
+                    🔴 <strong>Red Badge Alert:</strong> When <code className="bg-white px-1 rounded border border-amber-200 text-amber-800">Last Price &lt; Stop</code>, the Stop value is displayed with a <span className="bg-red-100 text-red-800 border border-red-300 px-1.5 py-0.5 rounded font-bold">Red Badge</span>.
+                  </p>
+                  <p className="text-amber-900 bg-amber-100/70 p-2 rounded border border-amber-300 font-medium">
+                    📌 <strong>Peak Reference:</strong> Persisted in <code className="bg-white px-1 rounded">trades.ratchet_stop</code> so historical MK-TOS files can be safely archived without losing the ratcheted floor.
                   </p>
                   <p className="text-amber-800 bg-amber-50 p-2 rounded border border-amber-200 font-medium">
                     ⚠️ <strong>Missing MK-TOS Quote:</strong> If the symbol has no quote or 52Low in MK-TOS, it is flagged as <span className="font-bold">Review</span>.
@@ -544,10 +547,13 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
                 </div>
                 <div className="text-xs text-gray-700 space-y-1.5">
                   <p>
-                    <strong>Stop Value:</strong> <code className="bg-white px-1.5 py-0.5 rounded border border-teal-200 text-teal-800">100-day Low (100-day-Low)</code> (Extracted from the 100-day-Low column in MK-TOS).
+                    <strong>Ratchet Trailing Stop:</strong> Tracks the highest <code className="bg-white px-1.5 py-0.5 rounded border border-teal-200 text-teal-800">100-day Low (100-day-Low)</code> recorded from <code className="bg-white px-1.5 py-0.5 rounded border border-teal-200 text-teal-800">first_buy_date</code> to present. Strictly increasing (trailing) trinquete: if 100-day-Low rises, the stop rises; if it drops or fluctuates, the previous highest stop is preserved and never steps down.
                   </p>
                   <p>
-                    🔴 <strong>Red Badge Alert (Sell Signal):</strong> When <code className="bg-white px-1 rounded border border-teal-200 text-teal-800">Last Price &lt; Stop</code> (stock closes below the 100-day low), the Stop value is displayed with a <span className="bg-red-100 text-red-800 border border-red-300 px-1.5 py-0.5 rounded font-bold">Red Badge</span>.
+                    🔴 <strong>Red Badge Alert (Sell Signal):</strong> When <code className="bg-white px-1 rounded border border-teal-200 text-teal-800">Last Price &lt; Stop</code>, the Stop value is displayed with a <span className="bg-red-100 text-red-800 border border-red-300 px-1.5 py-0.5 rounded font-bold">Red Badge</span>.
+                  </p>
+                  <p className="text-teal-900 bg-teal-100/70 p-2 rounded border border-teal-300 font-medium">
+                    📌 <strong>Peak Reference:</strong> Persisted in <code className="bg-white px-1 rounded">trades.ratchet_stop</code> so historical MK-TOS files can be safely archived without losing the ratcheted floor.
                   </p>
                   <p className="text-teal-800 bg-teal-50 p-2 rounded border border-teal-200 font-medium">
                     ⚠️ <strong>Missing MK-TOS Quote:</strong> If the symbol has no quote or 100-day-Low in MK-TOS, it is flagged as <span className="font-bold">Review</span>.

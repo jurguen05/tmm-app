@@ -155,18 +155,25 @@ This document centralizes the business logic, formulas, and data sources used to
 - **Strategy Identifier:** `New Yearly Highs` / `New Yearly High` / `NewYearlyHighs`
 - **Data Sources:**
   - **MK-TOS Quotes:** `low_52` (header `52Low`, 250-trading-day / 52-week minimum price)
+  - **Trades Table:** `first_buy_date`, `ratchet_stop` (persisted peak stop floor)
   - **Position Statement:** `stock_last` (Last Price)
 
 ### Formulas & Logic:
-1. **Stop Value:**
-   $$\text{Stop} = \text{quote.low\_52}$$
-   Displays the 52-week low directly from the active MK-TOS quote (`52Low`).
-2. **Trigger Condition (Red Alert):**
-   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra/cotiza por debajo del nuevo mínimo de 250 días / 52 semanas bursátiles):
+1. **Ratchet Trailing Stop (Strictly Increasing / Trinquete que nunca baja):**
+   - **Excel (The Closing Bell):**
+     $$= \text{IF}(52\text{Low}_{t-1} \ge 52\text{Low}_t, 52\text{Low}_{t-1}, 52\text{Low}_t)$$
+   - **Formula:**
+     $$\text{Stop} = \max\left(\text{persisted\_ratchet\_stop}, \max_{q \in \text{Quotes}, \text{Date}_q \ge \text{first\_buy\_date}} (\text{low\_52}_q)\right)$$
+   - Ensures the stop is strictly increasing (trailing): if the 52-week minimum price (`52Low`) rises, the stop rises; if it drops or fluctuates, the highest previous stop floor is preserved and never steps down.
+   - Evaluates all MK-TOS quotes from `first_buy_date` to today, falling back to the current quote if no post-entry quotes exist.
+2. **Persistence & Archiving Rule:**
+   - The highest ratchet stop floor is persisted in the `trades.ratchet_stop` master column while the trade is `Open`, ensuring that historical MK-TOS files older than 10 quote dates can be safely archived without losing the ratcheted stop value.
+3. **Trigger Condition (Red Alert):**
+   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra/cotiza por debajo del stop trinquete):
      - The Stop cell is highlighted with a **red badge** (`bg-red-100 text-red-800 border border-red-300`).
    - When $\text{Last Price} \ge \text{Stop}$:
      - The Stop cell retains standard styling.
-3. **Missing MK-TOS Quote:**
+4. **Missing MK-TOS Quote:**
    - If the symbol is not found in MK-TOS quotes or `52Low` is missing/zero, the position is marked as **`Review`** with a yellow row alert.
 
 ---
@@ -176,18 +183,25 @@ This document centralizes the business logic, formulas, and data sources used to
 - **Strategy Identifier:** `100-day-High` / `100 Day High` / `100dayhigh`
 - **Data Sources:**
   - **MK-TOS Quotes:** `low_100_day` (header `100-day-Low`, minimum price over the trailing 100 trading days)
+  - **Trades Table:** `first_buy_date`, `ratchet_stop` (persisted peak stop floor)
   - **Position Statement:** `stock_last` (Last Price)
 
 ### Formulas & Logic:
-1. **Stop Value:**
-   $$\text{Stop} = \text{quote.low\_100\_day}$$
-   Displays the 100-day low directly from the active MK-TOS quote (`100-day-Low`).
-2. **Trigger Condition (Red Alert / Vender):**
-   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra o cotiza por debajo del mínimo de los últimos 100 días):
+1. **Ratchet Trailing Stop (Strictly Increasing / Trinquete que nunca baja):**
+   - **Excel (The Closing Bell):**
+     $$= \text{IF}(100\text{Low}_{t-1} \ge 100\text{Low}_t, 100\text{Low}_{t-1}, 100\text{Low}_t)$$
+   - **Formula:**
+     $$\text{Stop} = \max\left(\text{persisted\_ratchet\_stop}, \max_{q \in \text{Quotes}, \text{Date}_q \ge \text{first\_buy\_date}} (\text{low\_100\_day}_q)\right)$$
+   - Ensures the stop is strictly increasing (trailing): if the 100-day minimum price (`100-day-Low`) rises, the stop rises; if it drops or fluctuates, the highest previous stop floor is preserved and never steps down.
+   - Evaluates all MK-TOS quotes from `first_buy_date` to today, falling back to the current quote if no post-entry quotes exist.
+2. **Persistence & Archiving Rule:**
+   - The highest ratchet stop floor is persisted in the `trades.ratchet_stop` master column while the trade is `Open`, ensuring that historical MK-TOS files older than 10 quote dates can be safely archived without losing the ratcheted stop value.
+3. **Trigger Condition (Red Alert / Vender):**
+   - When $\text{Last Price} < \text{Stop}$ (precio de la acción cierra o cotiza por debajo del stop trinquete de los últimos 100 días):
      - The Stop cell is highlighted with a **red badge** (`bg-red-100 text-red-800 border border-red-300`).
    - When $\text{Last Price} \ge \text{Stop}$:
      - The Stop cell retains standard styling.
-3. **Missing MK-TOS Quote:**
+4. **Missing MK-TOS Quote:**
    - If the symbol is not found in MK-TOS quotes or `100-day-Low` is missing/zero, the position is marked as **`Review`** with a yellow row alert.
 
 ---

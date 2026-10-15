@@ -11,6 +11,7 @@ import {
   getActiveStrategies,
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
+  updateTradesRatchetStops,
   syncTradesForCodes,
   getSpyDailyCloses,
   autoArchiveOldMkTosFiles,
@@ -117,6 +118,14 @@ export default async function StrategiesStopsPage() {
         weekend_trader_flag: c.weekend_trader_flag
       }));
 
+    // Persistir ratchet_stop para New Yearly Highs y 100-day-High en trades abiertos
+    const tradesWithRatchet = consolidado
+      .filter(c => c.ratchet_stop !== null && c.ratchet_stop !== undefined && c.ratchet_stop > 0 && c.trade_code && c.trade_code !== '-')
+      .map(c => ({
+        trade_code: Number(c.trade_code),
+        ratchet_stop: c.ratchet_stop!
+      }));
+
     // Persistir irreversiblemente el flag de Weekend Trader en trades abiertos cuando sea true
     const weekendTradesToFlag = consolidado
       .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
@@ -167,6 +176,9 @@ export default async function StrategiesStopsPage() {
       }
       if (weekendTradesToFlag.length > 0) {
         await updateTradesWeekendTraderFlags(supabase, weekendTradesToFlag).catch(() => {})
+      }
+      if (tradesWithRatchet.length > 0) {
+        await updateTradesRatchetStops(supabase, tradesWithRatchet).catch(() => {})
       }
       if (codesToAutoClose.length > 0) {
         await syncTradesForCodes(supabase, codesToAutoClose).catch(() => {})

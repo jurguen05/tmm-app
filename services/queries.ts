@@ -928,6 +928,26 @@ export async function updateTradesWeekendTraderFlags(
   }
 }
 
+// 30b. Actualizar ratchet_stop para trades abiertos (New Yearly Highs y 100-day-High)
+export async function updateTradesRatchetStops(
+  supabase: SupabaseClient,
+  items: { trade_code: number; ratchet_stop: number | null }[]
+): Promise<void> {
+  if (!items || items.length === 0) return;
+  await Promise.all(items.map(async (item) => {
+    try {
+      await supabase
+        .from('trades')
+        .update({ ratchet_stop: item.ratchet_stop })
+        .eq('trade_code', item.trade_code)
+        .eq('status', 'Open');
+    } catch (err: unknown) {
+      // Fallback seguro si la columna aún no está creada en DB
+      console.warn('[updateTradesRatchetStops] Note/Error:', err instanceof Error ? err.message : String(err));
+    }
+  }));
+}
+
 // 31. Obtener estado de frescura y sincronización de archivos para Strategies Stops
 export interface FreshnessStatus {
   positions: {

@@ -1,7 +1,7 @@
 // lib/strategiesCalculator.ts
 
 import { Position, Transaction, MkTosQuote, ConsolidatedStrategyStop, Trade, Strategy, SpyDailyClose } from '../types';
-import { normalizeUniqueKey, esViernes, esCierreSemanal, parsearFechaTOS } from './formatters';
+import { normalizeUniqueKey, esCierreSemanal, parsearFechaTOS } from './formatters';
 
 export type { ConsolidatedStrategyStop };
 
@@ -88,6 +88,54 @@ export const calcularMaxStockPriceYFecha = (
     max_stock_price: highestPrice > 0 ? highestPrice : null,
     max_stock_price_date: highestDate
   };
+};
+
+/**
+ * Calcula el stop con efecto "Ratchet" (trinquete estrictamente creciente) para:
+ * - 'New Yearly Highs': Stop = max(low_52 de todas las cotizaciones desde first_buy_date hasta hoy).
+ * - '100-day High': Stop = max(low_100_day de todas las cotizaciones desde first_buy_date hasta hoy).
+ *
+ * En Excel (The Closing Bell):
+ * =IF(Low_t-1 >= Low_t, Low_t-1, Low_t)
+ * Esto asegura que el stop sea estrictamente creciente (trailing):
+ * si el mínimo de 52 semanas o de 100 días sube, el stop sube; pero si baja o fluctúa,
+ * el stop anterior se preserva y no retrocede.
+ */
+export const calcularRatchetStop = (
+  field: 'low_52' | 'low_100_day',
+  firstBuyDate: string | null,
+  quotesDelSimbolo: MkTosQuote[],
+  latestQuote?: MkTosQuote | null,
+  persistedRatchetStop?: number | null
+): number | null => {
+  const normFirstBuy = firstBuyDate ? (parsearFechaTOS(firstBuyDate) || firstBuyDate.substring(0, 10)) : null;
+  const minDate = normFirstBuy || '1970-01-01';
+
+  let relevantQuotes = quotesDelSimbolo.filter(q => {
+    if (!q.quote_date) return false;
+    const qDate = parsearFechaTOS(q.quote_date) || q.quote_date.substring(0, 10);
+    return qDate >= minDate;
+  });
+
+  // Si no hay cotizaciones posteriores a la compra pero existe latestQuote, usarla como base
+  if (relevantQuotes.length === 0 && latestQuote) {
+    relevantQuotes = [latestQuote];
+  } else if (latestQuote && !relevantQuotes.some(q => q.id === latestQuote.id)) {
+    relevantQuotes.push(latestQuote);
+  }
+
+  let highestLow = (persistedRatchetStop && persistedRatchetStop > 0) ? persistedRatchetStop : 0;
+
+  for (const q of relevantQuotes) {
+    const val = q[field];
+    if (val !== null && val !== undefined && !isNaN(val) && val > 0) {
+      if (val > highestLow) {
+        highestLow = val;
+      }
+    }
+  }
+
+  return highestLow > 0 ? Number(highestLow.toFixed(4)) : null;
 };
 
 /**
@@ -395,14 +443,18 @@ export const consolidarStrategiesStops = (
         needsReview = true;
       }
     } else if (isNewYearlyHighs) {
-      // Regla New Yearly Highs:
-      // El Stop es el mínimo de 52 semanas / 250 días (columna '52Low' / low_52 en MK-TOS).
-      // Si el LAST está por debajo de ese valor, se pone en rojo.
-      if (!quote || quote.low_52 === null || quote.low_52 === undefined || quote.low_52 <= 0) {
+      // Regla New Yearly Highs (Ratchet / Stop Trinquete que nunca baja):
+      // En Excel (The Closing Bell): =IF(52Low_t-1 >= 52Low_t, 52Low_t-1, 52Low_t)
+      // El Stop es estrictamente creciente (trailing): evalúa el mínimo de 52 semanas (52Low)
+      // desde first_buy_date hasta hoy y preserva el máximo valor alcanzado sin retroceder.
+      const persistedRatchet = isTradeClosed ? null : (tradeFromMaster?.ratchet_stop ?? null);
+      const stopCalculado = calcularRatchetStop('low_52', firstBuyDate, quotesHistDelSimbolo, quote, persistedRatchet);
+
+      if (!stopCalculado || stopCalculado <= 0) {
         stop = 'Review';
         needsReview = true;
+        reviewReason = !quote ? 'Missing MK-TOS quote for symbol' : 'Missing 52Low in MK-TOS quotes';
       } else {
-        const stopCalculado = quote.low_52;
         stop = stopCalculado;
         stopValue = stopCalculado;
         needsReview = false;
@@ -411,14 +463,18 @@ export const consolidarStrategiesStops = (
         }
       }
     } else if (is100DayHigh) {
-      // Regla 100-day-High:
-      // El Stop es el mínimo de los últimos 100 días (columna '100-day-Low' / low_100_day en MK-TOS).
-      // Si el LAST cierra por debajo de ese valor, se pone en rojo (alerta de venta).
-      if (!quote || quote.low_100_day === null || quote.low_100_day === undefined || quote.low_100_day <= 0) {
+      // Regla 100-day-High (Ratchet / Stop Trinquete que nunca baja):
+      // En Excel (The Closing Bell): =IF(100Low_t-1 >= 100Low_t, 100Low_t-1, 100Low_t)
+      // El Stop es estrictamente creciente (trailing): evalúa el mínimo de 100 días (100-day-Low)
+      // desde first_buy_date hasta hoy y preserva el máximo valor alcanzado sin retroceder.
+      const persistedRatchet = isTradeClosed ? null : (tradeFromMaster?.ratchet_stop ?? null);
+      const stopCalculado = calcularRatchetStop('low_100_day', firstBuyDate, quotesHistDelSimbolo, quote, persistedRatchet);
+
+      if (!stopCalculado || stopCalculado <= 0) {
         stop = 'Review';
         needsReview = true;
+        reviewReason = !quote ? 'Missing MK-TOS quote for symbol' : 'Missing 100-day-Low in MK-TOS quotes';
       } else {
-        const stopCalculado = quote.low_100_day;
         stop = stopCalculado;
         stopValue = stopCalculado;
         needsReview = false;
@@ -517,6 +573,10 @@ export const consolidarStrategiesStops = (
       isStopRed = false;
     }
 
+    const ratchet_stop = (isNewYearlyHighs || is100DayHigh) && typeof stop === 'number'
+      ? stop
+      : null;
+
     return {
       id: pos.id,
       trade_code: trade_code,
@@ -530,6 +590,7 @@ export const consolidarStrategiesStops = (
       weekend_trader_flag: weekendTraderFlag,
       max_stock_price: max_stock_price,
       max_stock_price_date: max_stock_price_date,
+      ratchet_stop: ratchet_stop,
       stop: stop,
       stopValue: stopValue,
       isStopRed: isStopRed,

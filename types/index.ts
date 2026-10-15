@@ -49,6 +49,7 @@ export interface Trade {
   weekend_trader_flag: boolean;
   max_stock_price?: number | null;
   max_stock_price_date?: string | null;
+  ratchet_stop?: number | null;
   account_id?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -128,6 +129,7 @@ export interface ConsolidatedStrategyStop {
   weekend_trader_flag?: boolean;
   max_stock_price?: number | null;
   max_stock_price_date?: string | null;
+  ratchet_stop?: number | null;
   stop: string | number;
   stopValue?: number | null;
   isStopRed?: boolean;
