@@ -21,10 +21,6 @@ import { normalizeUniqueKey } from './formatters';
  * Estrategias excluidas explícitamente en las directrices de negocio para los análisis de P&L y Riesgo
  */
 export const EXCLUDED_STRATEGIES: readonly string[] = [
-  'Short Mean Reversion',
-  'Short RSI Thrust',
-  'MA Cross -Long',
-  'MA Cross -Short',
   'Hedge'
 ];
 
