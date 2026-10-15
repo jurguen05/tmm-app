@@ -141,3 +141,125 @@ export interface ConsolidatedStrategyStop {
   reviewReason?: string;
   rentabilidad: number;
 }
+
+// ==========================================
+// EXECUTIVE DASHBOARD TYPES
+// ==========================================
+
+export interface AssetAllocationRow {
+  strategy: string;
+  stockValue: number;
+  callValue: number;
+  putValue: number;
+  cashBalance: number;
+  portfolioValue: number;
+  allocationPct: number;
+}
+
+export interface AssetAllocationSummary {
+  rows: AssetAllocationRow[];
+  totalStockValue: number;
+  totalCallValue: number;
+  totalPutValue: number;
+  totalCashBalance: number;
+  totalPortfolioValue: number;
+  stockPct: number;
+  callPct: number;
+  putPct: number;
+  cashPct: number;
+}
+
+export interface StrategyPnLRow {
+  strategy: string;
+  closedPnL: number;
+  openPnL: number;
+  totalPnL: number;
+}
+
+export interface StrategyPnLSummary {
+  rows: StrategyPnLRow[];
+  totalClosedPnL: number;
+  totalOpenPnL: number;
+  grandTotalPnL: number;
+}
+
+export interface AuditMetricColumn {
+  averageWinner: number;
+  averageLoser: number;
+  winLossRatio: number;
+  winRatePct: number;
+  expectancy: number;
+  quantity: number;
+  totalPnL: number;
+}
+
+export interface AuditMetricsSummary {
+  closed: AuditMetricColumn;
+  open: AuditMetricColumn;
+  overall: AuditMetricColumn;
+}
+
+export interface RiskStrategyRow {
+  strategy: string;
+  totalPnL: number;
+  initialInvestment: number;
+  rMultiple: number;
+}
+
+export interface RiskMultiplesSummary {
+  rows: RiskStrategyRow[];
+  totalPnL: number;
+  totalInitialInvestment: number;
+  portfolioR: number;
+  closedTradesCount: number;
+  averageInitialInvestment: number;
+}
+
+export interface ExecutiveDashboardData {
+  assetAllocation: AssetAllocationSummary;
+  strategyPnL: StrategyPnLSummary;
+  auditMetrics: AuditMetricsSummary;
+  riskMultiples: RiskMultiplesSummary;
+}
+
+// ==========================================
+// PORTFOLIO RISK TYPES
+// ==========================================
+
+export interface PositionRiskItem {
+  trade_code: string;
+  symbol: string;
+  strategy: string;
+  currentPrice: number;
+  stopPrice: number;
+  distancePct: number;
+  positionAmount: number;
+  scenarioLoss: number;
+  pctOfStrategy: number;
+  pctOfPortfolio: number;
+}
+
+export interface StrategyRiskSummary {
+  strategy: string;
+  positionsCount: number;
+  totalPositionAmount: number;
+  totalScenarioLoss: number;
+  pctOfPortfolioRisk: number;
+}
+
+export interface MarketDropLevel {
+  dropPct: number;
+  remainingCapital: number;
+  stoppedOutCapital: number;
+  stoppedPositionsCount: number;
+}
+
+export interface PortfolioRiskResult {
+  summaries: StrategyRiskSummary[];
+  positions: PositionRiskItem[];
+  drops: MarketDropLevel[];
+  totalCapital: number;
+  totalRisk: number;
+  overallRiskPct: number;
+}
+

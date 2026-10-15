@@ -1257,4 +1257,128 @@ export async function getStrategiesStopsFreshness(
   };
 }
 
+// 32. Obtener todas las transacciones paginadas para cálculos analíticos del Dashboard
+export async function getAllTransactions(supabase: SupabaseClient): Promise<Transaction[]> {
+  const pageSize = 1000;
+  const allTxs: Transaction[] = [];
+  let page = 0;
+
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*, strategies(name)')
+      .order('date', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.warn('[getAllTransactions] Warning fetching transactions:', error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    allTxs.push(...data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+
+  return allTxs;
+}
+
+// 33. Cargar todos los orígenes de datos requeridos por el Centro de Control Ejecutivo del Dashboard
+export async function getDashboardExecutiveSourceData(supabase: SupabaseClient): Promise<{
+  positions: Position[];
+  transactions: Transaction[];
+  strategies: Strategy[];
+  trades: Trade[];
+}> {
+  const [positions, transactions, strategies, trades] = await Promise.all([
+    getPositions(supabase).catch(() => []),
+    getAllTransactions(supabase).catch(() => []),
+    getActiveStrategies(supabase).catch(() => []),
+    getTrades(supabase).catch(() => [])
+  ]);
+
+  return {
+    positions,
+    transactions,
+    strategies,
+    trades
+  };
+}
+
+// 34. Cargar todos los orígenes de datos requeridos por Portfolio Risk
+export async function getPortfolioRiskSourceData(supabase: SupabaseClient): Promise<{
+  positions: Position[];
+  transactions: Transaction[];
+  mkTosQuotes: MkTosQuote[];
+  trades: Trade[];
+  strategies: Strategy[];
+  spyCloses: SpyDailyClose[];
+}> {
+  const [positions, openTrades, activeStrategies, spyCloses] = await Promise.all([
+    getPositions(supabase).catch(() => []),
+    getOpenTrades(supabase).catch(() => []),
+    getActiveStrategies(supabase).catch(() => []),
+    getSpyDailyCloses(supabase).catch(() => [])
+  ]);
+
+  if (!positions || positions.length === 0) {
+    return {
+      positions: [],
+      transactions: [],
+      mkTosQuotes: [],
+      trades: openTrades || [],
+      strategies: activeStrategies || [],
+      spyCloses: spyCloses || []
+    };
+  }
+
+  const uniqueKeys = positions.map(p => p.unique_key).filter(Boolean);
+  const keysToQuery = new Set<string>();
+  for (const k of uniqueKeys) {
+    keysToQuery.add(k);
+    const match = k.trim().match(/^([A-Z]+)-(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/);
+    if (match) {
+      const ticker = match[1];
+      const p1 = match[2].padStart(2, '0');
+      const p2 = match[3].padStart(2, '0');
+      const yyyy = match[4];
+      const rest = match[5];
+      keysToQuery.add(`${ticker}-${p2}/${p1}/${yyyy} ${rest}`);
+    }
+  }
+
+  const symbols = Array.from(new Set([...positions.map(p => p.symbol).filter(Boolean), 'SPY']));
+  const prefetchedCodes = Array.from(new Set(
+    (openTrades || [])
+      .map(t => Number(t.trade_code))
+      .filter(c => !isNaN(c) && c > 0)
+  ));
+
+  const [initialTxs, mkTosQuotes, prefetchedTxs] = await Promise.all([
+    getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)).catch(() => []),
+    getLatestMkTosQuotes(supabase, symbols).catch(() => []),
+    getTransactionsByTradeCodes(supabase, prefetchedCodes).catch(() => [])
+  ]);
+
+  const txMap = new Map<string, Transaction>();
+  for (const t of initialTxs || []) {
+    txMap.set(t.id, t);
+  }
+  for (const t of prefetchedTxs || []) {
+    txMap.set(t.id, t);
+  }
+
+  return {
+    positions,
+    transactions: Array.from(txMap.values()),
+    mkTosQuotes: mkTosQuotes || [],
+    trades: openTrades || [],
+    strategies: activeStrategies || [],
+    spyCloses: spyCloses || []
+  };
+}
+
+
 
