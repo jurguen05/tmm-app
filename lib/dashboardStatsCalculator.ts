@@ -348,9 +348,20 @@ export const calcularPnLDiccionarios = (
   trades?: Trade[]
 ): PnLDiccionarios => {
   const tradesByCode = new Map<number, Trade>();
+  const openTradesBySymbol = new Map<string, Trade[]>();
+
   (trades || []).forEach(tr => {
     if (tr.trade_code !== null && tr.trade_code !== undefined) {
-      tradesByCode.set(Number(tr.trade_code), tr);
+      const codeNum = Number(tr.trade_code);
+      if (!isNaN(codeNum)) {
+        tradesByCode.set(codeNum, tr);
+      }
+    }
+    if ((tr.status || '').toLowerCase() === 'open' && tr.symbol) {
+      const sym = tr.symbol.trim().toUpperCase();
+      const list = openTradesBySymbol.get(sym) || [];
+      list.push(tr);
+      openTradesBySymbol.set(sym, list);
     }
   });
 
@@ -364,66 +375,117 @@ export const calcularPnLDiccionarios = (
     }
   }
 
-  const dictAmounts = new Map<string, number>();
-  const dictStrategy = new Map<string, string>();
-  const dictStatus = new Map<string, string>();
-  const symbolCashFlows = new Map<string, number>();
-  const symbolStrategy = new Map<string, string>();
+  // 2. Acumular importes por trade_code a partir de transacciones como fallback
+  const txAmountsByTrade = new Map<string, number>();
+  const txFirstStrategyByTrade = new Map<string, string>();
+  const txFirstStatusByTrade = new Map<string, string>();
+  const txSymbolByTrade = new Map<string, string>();
 
   for (const tx of transactions) {
     const tid = tx.trade_code !== null && tx.trade_code !== undefined ? String(tx.trade_code).trim() : '';
     if (!tid || tid === '1' || tid.toUpperCase() === 'N/A') continue;
 
+    const amt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
+    txAmountsByTrade.set(tid, (txAmountsByTrade.get(tid) || 0) + amt);
+
+    if (!txFirstStrategyByTrade.has(tid)) {
+      const rawStrat = tx.strategies?.name || tx.strategy || 'Unassigned';
+      txFirstStrategyByTrade.set(tid, normalizarNombreEstrategia(rawStrat));
+    }
+    if (!txFirstStatusByTrade.has(tid)) {
+      txFirstStatusByTrade.set(tid, (tx.position_status || (tx as any).status || '').trim());
+    }
+    if (!txSymbolByTrade.has(tid) && tx.symbol) {
+      txSymbolByTrade.set(tid, tx.symbol.trim().toUpperCase());
+    }
+  }
+
+  // Identificar todas las claves de trade_code presentes (desde trades maestros o transacciones)
+  const allTradeKeys = new Set<string>([
+    ...Array.from(tradesByCode.keys()).map(String),
+    ...Array.from(txAmountsByTrade.keys())
+  ]);
+
+  const dictClosed = new Map<string, number>();
+  const strategyClosedPnL = new Map<string, number>();
+  const symbolCashFlows = new Map<string, number>();
+  const symbolStrategy = new Map<string, string>();
+
+  // Regla de dominio: Un símbolo sólo pertenece a una estrategia a la vez.
+  // Mapear la estrategia de cada símbolo a partir de los trades maestros abiertos primero.
+  for (const [sym, trList] of openTradesBySymbol.entries()) {
+    const firstTr = trList[0];
+    const sName = normalizarNombreEstrategia(firstTr.strategies?.name || (firstTr as any).strategy);
+    if (sName && sName !== 'Unassigned') {
+      symbolStrategy.set(sym, sName);
+    }
+  }
+
+  for (const tid of allTradeKeys) {
+    if (tid === '1' || tid.toUpperCase() === 'N/A') continue;
     const codeNum = Number(tid);
     const tr = !isNaN(codeNum) ? tradesByCode.get(codeNum) : undefined;
-    const rawStrat = tr?.strategies?.name || tx.strategies?.name || tx.strategy || 'Unassigned';
-    const strat = normalizarNombreEstrategia(rawStrat);
 
+    const rawStrat = tr?.strategies?.name || (tr as any)?.strategy || txFirstStrategyByTrade.get(tid) || 'Unassigned';
+    const strat = normalizarNombreEstrategia(rawStrat);
     if (isExcludedStrategy(strat)) continue;
 
-    const sym = (tx.symbol || '').trim().toUpperCase();
-    const amt = typeof tx.amount === 'number' && !isNaN(tx.amount) ? tx.amount : 0;
-    const status = (tr?.status || tx.position_status || (tx as any).status || '').trim();
+    // Estado definitivo: si existe en la tabla trades, su status manda. Si no, fallback a transacciones.
+    const effectiveStatus = (tr?.status || txFirstStatusByTrade.get(tid) || '').toLowerCase();
 
-    dictAmounts.set(tid, (dictAmounts.get(tid) || 0) + amt);
-    if (!dictStrategy.has(tid)) dictStrategy.set(tid, strat);
-    if (!dictStatus.has(tid)) dictStatus.set(tid, status);
+    // Cash flow total del trade (si está persistido en el trade se usa directamente, sino la suma de transacciones)
+    const totalAmt = (tr?.cash_flow !== null && tr?.cash_flow !== undefined)
+      ? Number(tr.cash_flow)
+      : (txAmountsByTrade.get(tid) || 0);
 
-    // Si la operación está abierta, acumulamos su cash flow y guardamos su estrategia
-    if (status.toLowerCase() === 'open' && sym) {
-      symbolCashFlows.set(sym, (symbolCashFlows.get(sym) || 0) + amt);
-      if (strat && strat !== 'Unassigned') {
-        symbolStrategy.set(sym, strat);
+    const sym = (tr?.symbol || txSymbolByTrade.get(tid) || '').trim().toUpperCase();
+
+    if (effectiveStatus === 'closed' || effectiveStatus === '') {
+      // Trade Cerrado -> Closed P&L
+      const realizedPnL = (tr?.realized_pnl !== null && tr?.realized_pnl !== undefined)
+        ? Number(tr.realized_pnl)
+        : totalAmt;
+
+      dictClosed.set(tid, realizedPnL);
+      strategyClosedPnL.set(strat, (strategyClosedPnL.get(strat) || 0) + realizedPnL);
+    } else if (effectiveStatus === 'open') {
+      // Trade Abierto -> Open Cash Flow
+      if (sym) {
+        symbolCashFlows.set(sym, (symbolCashFlows.get(sym) || 0) + totalAmt);
+        if (!symbolStrategy.has(sym) || symbolStrategy.get(sym) === 'Unassigned') {
+          symbolStrategy.set(sym, strat);
+        }
       }
     }
   }
 
-  // 2. Calcular Open PnL por Símbolo y asignarlo a su Estrategia
+  // 3. Calcular Open PnL por Símbolo y asignarlo a su Estrategia
   const dictOpen = new Map<string, number>();
   const strategyOpenPnL = new Map<string, number>();
 
-  for (const [symKey, cashFlow] of symbolCashFlows.entries()) {
+  const allOpenSymbols = new Set<string>([
+    ...Array.from(symbolCashFlows.keys()),
+    ...Array.from(symbolMarketValues.keys())
+  ]);
+
+  for (const symKey of allOpenSymbols) {
+    const cashFlow = symbolCashFlows.get(symKey) || 0;
     const marketVal = symbolMarketValues.get(symKey) || 0;
     const openPnLVal = cashFlow + marketVal;
+
     dictOpen.set(symKey, openPnLVal);
 
-    const stName = symbolStrategy.get(symKey) || 'Unassigned';
+    let stName = symbolStrategy.get(symKey);
+    if (!stName || stName === 'Unassigned') {
+      const openTrs = openTradesBySymbol.get(symKey);
+      if (openTrs && openTrs.length > 0) {
+        stName = normalizarNombreEstrategia(openTrs[0].strategies?.name || (openTrs[0] as any).strategy);
+      }
+    }
+    stName = normalizarNombreEstrategia(stName || 'Unassigned');
+
     if (!isExcludedStrategy(stName)) {
       strategyOpenPnL.set(stName, (strategyOpenPnL.get(stName) || 0) + openPnLVal);
-    }
-  }
-
-  // 3. Calcular Closed PnL por TradeID y agrupar por Estrategia
-  const dictClosed = new Map<string, number>();
-  const strategyClosedPnL = new Map<string, number>();
-
-  for (const [tidKey, totalAmt] of dictAmounts.entries()) {
-    const statusVal = (dictStatus.get(tidKey) || '').toLowerCase();
-    const stratVal = dictStrategy.get(tidKey) || 'Unassigned';
-
-    if ((statusVal === 'closed' || statusVal === '') && !isExcludedStrategy(stratVal)) {
-      dictClosed.set(tidKey, totalAmt);
-      strategyClosedPnL.set(stratVal, (strategyClosedPnL.get(stratVal) || 0) + totalAmt);
     }
   }
 
@@ -704,35 +766,50 @@ export const calcularRiskMultiples = (
 
   let closedTradesCount = 0;
 
-  for (const [code, txs] of txsByTradeCode.entries()) {
+  const allCodes = new Set<number>([
+    ...Array.from(tradesByCode.keys()),
+    ...Array.from(txsByTradeCode.keys())
+  ]);
+
+  for (const code of allCodes) {
+    if (code <= 1) continue;
     const tr = tradesByCode.get(code);
-    const isClosed = tr ? tr.status === 'Closed' : txs.every(t => (t.position_status || '').toLowerCase() === 'closed');
+    const txs = txsByTradeCode.get(code) || [];
+    const isClosed = tr ? tr.status === 'Closed' : (txs.length > 0 && txs.every(t => (t.position_status || '').toLowerCase() === 'closed'));
 
     if (isClosed) {
-      const rawStratName = tr?.strategies?.name || txs.find(t => t.strategies?.name)?.strategies?.name || txs.find(t => t.strategy)?.strategy || 'Unassigned';
+      const rawStratName = tr?.strategies?.name || (tr as any)?.strategy || txs.find(t => t.strategies?.name)?.strategies?.name || txs.find(t => t.strategy)?.strategy || 'Unassigned';
       const stratName = normalizarNombreEstrategia(rawStratName);
 
       if (!isExcludedStrategy(stratName)) {
         closedTradesCount++;
 
-        // 1. Calcular Total P&L del trade (suma de amount de todas sus transacciones)
-        const tradePnL = txs.reduce((sum, t) => sum + (typeof t.amount === 'number' && !isNaN(t.amount) ? t.amount : 0), 0);
+        // 1. Total P&L del trade: usar tr.realized_pnl si está presente, sino suma de amount de sus transacciones
+        let tradePnL = 0;
+        if (tr?.realized_pnl !== null && tr?.realized_pnl !== undefined) {
+          tradePnL = Number(tr.realized_pnl);
+        } else if (txs.length > 0) {
+          tradePnL = txs.reduce((sum, t) => sum + (typeof t.amount === 'number' && !isNaN(t.amount) ? t.amount : 0), 0);
+        }
 
-        // 2. Calcular Inversión Inicial: Desembolso inicial de la primera compra cronológica
-        const sortedTxs = [...txs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-        const firstBuyTx = sortedTxs.find(t => {
-          const act = (t.action || '').toLowerCase();
-          return act.includes('buy') || (typeof t.amount === 'number' && t.amount < 0);
-        }) || sortedTxs[0];
-
+        // 2. Inversión Inicial: usar tr.initial_investment si está presente y es > 0, sino primera compra cronológica
         let tradeInitialInvestment = 0;
-        if (firstBuyTx) {
-          if (typeof firstBuyTx.amount === 'number' && firstBuyTx.amount !== 0) {
-            tradeInitialInvestment = Math.abs(firstBuyTx.amount);
-          } else if (typeof firstBuyTx.price === 'number' && typeof firstBuyTx.quantity === 'number') {
-            const multiplier = firstBuyTx.instrument === 'Option' ? 100 : 1;
-            tradeInitialInvestment = Math.abs(firstBuyTx.price * firstBuyTx.quantity * multiplier);
+        if (tr?.initial_investment !== null && tr?.initial_investment !== undefined && tr.initial_investment > 0) {
+          tradeInitialInvestment = Number(tr.initial_investment);
+        } else if (txs.length > 0) {
+          const sortedTxs = [...txs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          const firstBuyTx = sortedTxs.find(t => {
+            const act = (t.action || '').toLowerCase();
+            return act.includes('buy') || (typeof t.amount === 'number' && t.amount < 0);
+          }) || sortedTxs[0];
+
+          if (firstBuyTx) {
+            if (typeof firstBuyTx.amount === 'number' && firstBuyTx.amount !== 0) {
+              tradeInitialInvestment = Math.abs(firstBuyTx.amount);
+            } else if (typeof firstBuyTx.price === 'number' && typeof firstBuyTx.quantity === 'number') {
+              const multiplier = firstBuyTx.instrument === 'Option' ? 100 : 1;
+              tradeInitialInvestment = Math.abs(firstBuyTx.price * firstBuyTx.quantity * multiplier);
+            }
           }
         }
 

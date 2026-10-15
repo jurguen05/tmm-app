@@ -54,6 +54,9 @@ export interface Trade {
   exit_price?: number | null;
   exit_signal?: number | null;
   closed_date?: string | null;
+  cash_flow?: number | null;
+  realized_pnl?: number | null;
+  initial_investment?: number | null;
   account_id?: string | null;
   created_at?: string;
   updated_at?: string;
