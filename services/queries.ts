@@ -704,12 +704,16 @@ export async function updateTradeField(
   supabase: SupabaseClient,
   tradeCode: number,
   field: string,
-  value: any
+  value: any,
+  extraUpdates?: Record<string, any>
 ): Promise<void> {
-  const updates: Record<string, any> = { [field]: value };
+  const updates: Record<string, any> = { [field]: value, ...(extraUpdates || {}) };
   if (field === 'status' && value === 'Closed') {
     updates.max_stock_price = null;
     updates.max_stock_price_date = null;
+    if (!updates.closed_date) {
+      updates.closed_date = new Date().toISOString().substring(0, 10);
+    }
   }
 
   const { error } = await supabase
@@ -717,7 +721,120 @@ export async function updateTradeField(
     .update(updates)
     .eq('trade_code', tradeCode);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (extraUpdates && Object.keys(extraUpdates).length > 0) {
+      const fallbackUpdates: Record<string, any> = { [field]: value };
+      if (field === 'status' && value === 'Closed') {
+        fallbackUpdates.max_stock_price = null;
+        fallbackUpdates.max_stock_price_date = null;
+      }
+      const { error: fbErr } = await supabase
+        .from('trades')
+        .update(fallbackUpdates)
+        .eq('trade_code', tradeCode);
+      if (fbErr) throw new Error(fbErr.message);
+      return;
+    }
+    throw new Error(error.message);
+  }
+}
+
+// 26c. Cerrar un trade registrando sus métricas de salida (exit_stop, exit_price, exit_signal, closed_date)
+export async function closeTradeWithExitMetrics(
+  supabase: SupabaseClient,
+  tradeCode: number,
+  explicitMetrics?: {
+    exit_stop?: number | null;
+    exit_price?: number | null;
+    exit_signal?: number | null;
+    closed_date?: string | null;
+  }
+): Promise<void> {
+  const today = new Date().toISOString().substring(0, 10);
+  const payload: Record<string, any> = {
+    status: 'Closed',
+    closed_date: explicitMetrics?.closed_date || today,
+    max_stock_price: null,
+    max_stock_price_date: null
+  };
+
+  if (explicitMetrics?.exit_stop !== undefined && explicitMetrics.exit_stop !== null && typeof explicitMetrics.exit_stop === 'number') {
+    payload.exit_stop = explicitMetrics.exit_stop;
+  }
+  if (explicitMetrics?.exit_price !== undefined && explicitMetrics.exit_price !== null && typeof explicitMetrics.exit_price === 'number') {
+    payload.exit_price = explicitMetrics.exit_price;
+  }
+  if (explicitMetrics?.exit_signal !== undefined && explicitMetrics.exit_signal !== null && typeof explicitMetrics.exit_signal === 'number') {
+    payload.exit_signal = explicitMetrics.exit_signal;
+  }
+
+  // Si faltó alguna métrica de salida, buscarla desde el trade y su cotización en MK-TOS
+  if (payload.exit_price === undefined || payload.exit_stop === undefined) {
+    try {
+      const { data: tr } = await supabase
+        .from('trades')
+        .select('symbol, strategy_id, stock_entry_price, ratchet_stop, strategies(name)')
+        .eq('trade_code', tradeCode)
+        .maybeSingle();
+
+      if (tr && tr.symbol) {
+        const { data: quote } = await supabase
+          .from('mk_tos_quotes')
+          .select('last_price, mac_stop, trendpilot_stop, low_52, low_100_day, ema, bollinger_bands')
+          .eq('symbol', tr.symbol.trim().toUpperCase())
+          .order('quote_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (quote) {
+          const sName = ((tr.strategies as any)?.name || '').toLowerCase();
+          const lastPrice = quote.last_price || null;
+          if (payload.exit_price === undefined && lastPrice) {
+            payload.exit_price = lastPrice;
+          }
+
+          if (sName.includes('mac')) {
+            // Regla MAC: Signal es mac_stop, Stop es Last
+            payload.exit_signal = quote.mac_stop ?? null;
+            if (payload.exit_stop === undefined) payload.exit_stop = lastPrice;
+          } else if (sName.includes('trend') || sName.includes('pilot')) {
+            // Regla Trend Pilot: Signal es trendpilot_stop, Stop es Last
+            payload.exit_signal = quote.trendpilot_stop ?? null;
+            if (payload.exit_stop === undefined) payload.exit_stop = lastPrice;
+          } else if (sName.includes('newyearly') || sName.includes('yearly')) {
+            if (payload.exit_stop === undefined) {
+              payload.exit_stop = tr.ratchet_stop || quote.low_52 || null;
+            }
+          } else if (sName.includes('100')) {
+            if (payload.exit_stop === undefined) {
+              payload.exit_stop = tr.ratchet_stop || quote.low_100_day || null;
+            }
+          } else if (payload.exit_stop === undefined && lastPrice) {
+            payload.exit_stop = lastPrice;
+          }
+        }
+      }
+    } catch (err: unknown) {
+      console.warn('[closeTradeWithExitMetrics] Warning al consultar cotizaciones:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  try {
+    const { error } = await supabase
+      .from('trades')
+      .update(payload)
+      .eq('trade_code', tradeCode);
+
+    if (error) {
+      // Fallback seguro si las columnas nuevas no están presentes en DB
+      await supabase
+        .from('trades')
+        .update({ status: 'Closed', max_stock_price: null, max_stock_price_date: null })
+        .eq('trade_code', tradeCode);
+    }
+  } catch {
+    await supabase.from('trades').update({ status: 'Closed' }).eq('trade_code', tradeCode);
+  }
 }
 
 // 26b. Actualizar campos en todas las transacciones vinculadas a un trade_code
@@ -830,6 +947,20 @@ export async function syncTradesForCodes(
       const isBeforeCutoff = Boolean(normDateStr && normDateStr < '2026-07-24');
       const initialWeekendFlag = isWeekendTrade && isBeforeCutoff;
 
+      let closedDateFromTx: string | null = null;
+      let exitPriceFromTx: number | null = null;
+      if (calculatedStatus === 'Closed') {
+        const txsSell = codeTxs.filter(t => {
+          const act = (t.action || '').trim().toLowerCase();
+          return act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+        });
+        const lastSellTx = txsSell.length > 0 ? txsSell[txsSell.length - 1] : codeTxs[codeTxs.length - 1];
+        if (lastSellTx) {
+          closedDateFromTx = parsearFechaTOS(lastSellTx.date) || lastSellTx.date.substring(0, 10);
+          exitPriceFromTx = (lastSellTx.price && lastSellTx.price > 0) ? lastSellTx.price : null;
+        }
+      }
+
       if (!existing) {
         tradesToUpsert.push({
           trade_code: code,
@@ -842,6 +973,8 @@ export async function syncTradesForCodes(
           weekend_trader_flag: calculatedStatus === 'Closed' ? false : initialWeekendFlag,
           max_stock_price: calculatedStatus === 'Closed' ? null : undefined,
           max_stock_price_date: calculatedStatus === 'Closed' ? null : undefined,
+          closed_date: calculatedStatus === 'Closed' ? closedDateFromTx : undefined,
+          exit_price: calculatedStatus === 'Closed' ? exitPriceFromTx : undefined,
           account_id: accountId
         });
       } else {
@@ -857,6 +990,12 @@ export async function syncTradesForCodes(
           updateObj.max_stock_price = null;
           updateObj.max_stock_price_date = null;
           updateObj.weekend_trader_flag = false;
+          if (!existing.closed_date && closedDateFromTx) {
+            updateObj.closed_date = closedDateFromTx;
+          }
+          if (!existing.exit_price && exitPriceFromTx) {
+            updateObj.exit_price = exitPriceFromTx;
+          }
         } else if (isWeekendTrade && isBeforeCutoff) {
           updateObj.weekend_trader_flag = true;
         }

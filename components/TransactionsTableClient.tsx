@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { updateTransactionField, deleteTransactions, updateTradeField, updateTransactionsByTradeCode, getFilteredTransactions } from '../services/queries'
+import { updateTransactionField, deleteTransactions, updateTradeField, closeTradeWithExitMetrics, updateTransactionsByTradeCode, getFilteredTransactions } from '../services/queries'
 import { Transaction, Strategy } from '../types'
 import TransactionsTable from './TransactionsTable'
 import PaginationControls from './PaginationControls'
@@ -97,7 +97,11 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
         } else if (campo === 'stock_entry_price') {
           await updateTradeField(supabase, codeNum, 'stock_entry_price', valor);
         } else if (campo === 'position_status') {
-          await updateTradeField(supabase, codeNum, 'status', valor);
+          if (valor === 'Closed') {
+            await closeTradeWithExitMetrics(supabase, codeNum);
+          } else {
+            await updateTradeField(supabase, codeNum, 'status', valor);
+          }
         }
 
         // 2. Actualizar las transacciones hijas para consistencia

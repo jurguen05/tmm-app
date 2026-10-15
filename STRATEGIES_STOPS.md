@@ -258,5 +258,19 @@ This document centralizes the business logic, formulas, and data sources used to
 
 All current standard strategies (Tech Trader, Trend Pilot, MAC, 20% Flipper, Weekend Trader, New Yearly Highs, 100-day-High, BBO, and Hedge) have their Stop rules configured. Any additional strategies added to the system will be documented here.
 
+---
+
+## 12. Closed Trades Exit Metrics Persistence
+
+When a trade is closed (`status = 'Closed'`), whether automatically (net position reaches 0 via transaction uploads) or manually (user closes missing trade or toggles position status), the system preserves the final exit parameters in the `trades` master table:
+
+1. **`exit_stop` (`NUMERIC(12, 4)`):** The definitive stop value active at the time of closure (preserves the ratcheted floor for New Yearly Highs / 100-day High, EMA floor for Tech Trader, percentage floor for 20% Flipper / Weekend Trader, or Last for MAC / Trend Pilot).
+2. **`exit_price` (`NUMERIC(12, 4)`):** The market `Last` price of the underlying stock at the moment of closure.
+3. **`exit_signal` (`NUMERIC(12, 4)`):** The technical indicator signal number at the moment of closure:
+   - **MAC (MACD):** Persists the numerical indicator from `mac_stop` (`MAC_STOP`).
+   - **Trend Pilot:** Persists the numerical indicator from `trendpilot_stop` (`TrendPilot_STOP`).
+4. **`closed_date` (`DATE`):** The date the position was closed (extracted from the final sell transaction or the date of confirmation).
+
+
 
 

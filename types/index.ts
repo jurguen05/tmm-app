@@ -50,6 +50,10 @@ export interface Trade {
   max_stock_price?: number | null;
   max_stock_price_date?: string | null;
   ratchet_stop?: number | null;
+  exit_stop?: number | null;
+  exit_price?: number | null;
+  exit_signal?: number | null;
+  closed_date?: string | null;
   account_id?: string | null;
   created_at?: string;
   updated_at?: string;

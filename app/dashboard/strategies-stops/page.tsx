@@ -12,6 +12,7 @@ import {
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
   updateTradesRatchetStops,
+  closeTradeWithExitMetrics,
   syncTradesForCodes,
   getSpyDailyCloses,
   autoArchiveOldMkTosFiles,
@@ -181,6 +182,17 @@ export default async function StrategiesStopsPage() {
         await updateTradesRatchetStops(supabase, tradesWithRatchet).catch(() => {})
       }
       if (codesToAutoClose.length > 0) {
+        await Promise.all(codesToAutoClose.map(async (c) => {
+          const match = consolidado.find(d => Number(d.trade_code) === c);
+          if (match) {
+            await closeTradeWithExitMetrics(supabase, c, {
+              exit_stop: typeof match.stop === 'number' ? match.stop : null,
+              exit_price: match.lastPrice || null,
+              exit_signal: match.signal ?? null,
+              closed_date: new Date().toISOString().substring(0, 10)
+            });
+          }
+        })).catch(() => {});
         await syncTradesForCodes(supabase, codesToAutoClose).catch(() => {})
       }
       // Solo archivar automáticamente si la persistencia de picos no tuvo errores
