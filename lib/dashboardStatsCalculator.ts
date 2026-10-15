@@ -432,7 +432,11 @@ export const calcularStrategyPnL = (
         totalPnL: Number(rowTotalPnL.toFixed(2))
       };
     })
-    .sort((a, b) => b.totalPnL - a.totalPnL);
+    .sort((a, b) => {
+      if (a.strategy === 'Unassigned') return 1;
+      if (b.strategy === 'Unassigned') return -1;
+      return a.strategy.localeCompare(b.strategy);
+    });
 
   const grandTotalPnL = totalClosedPnL + totalOpenPnL;
 
