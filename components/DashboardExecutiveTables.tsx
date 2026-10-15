@@ -58,6 +58,17 @@ export const formatRatio = (val: number | null | undefined): string => {
   }).format(val)
 }
 
+/** Formateador con separadores de miles para inputs: 17,379.61 */
+const formatThousands = (val: number | string): string => {
+  if (val === '' || val === null || val === undefined) return '0.00'
+  const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[^0-9.-]+/g, ''))
+  if (isNaN(num)) return '0.00'
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(num)
+}
+
 export default function DashboardExecutiveTables({
   initialData,
   positions,
@@ -66,17 +77,18 @@ export default function DashboardExecutiveTables({
   transactions
 }: DashboardExecutiveTablesProps) {
   // Estado local para permitir ajustar el saldo en efectivo de la cartera (Cash Balance)
-  const [cashBalanceInput, setCashBalanceInput] = useState<string>('0')
+  // Inicializado con formato de miles a partir del valor de 'Cash & Sweep Vehicle'
+  const detectedCash = initialData.assetAllocation.totalCashBalance
+  const [cashBalanceInput, setCashBalanceInput] = useState<string>(() => {
+    return detectedCash > 0 ? formatThousands(detectedCash) : '0.00'
+  })
   const [activeTab, setActiveTab] = useState<'all' | 'allocation' | 'pnl' | 'audit' | 'risk'>('all')
 
   // Recalcular Asset Allocation si el usuario ajusta el Cash Balance
   const assetAllocation = useMemo(() => {
     const cashVal = parseFloat(cashBalanceInput.replace(/[^0-9.-]+/g, '')) || 0
-    if (cashVal === 0 && initialData.assetAllocation.totalCashBalance === 0) {
-      return initialData.assetAllocation
-    }
     return calcularAssetAllocation(positions, strategies, trades, transactions, cashVal)
-  }, [cashBalanceInput, initialData.assetAllocation, positions, strategies, trades, transactions])
+  }, [cashBalanceInput, positions, strategies, trades, transactions])
 
   const { strategyPnL, auditMetrics, riskMultiples } = initialData
 
@@ -97,24 +109,30 @@ export default function DashboardExecutiveTables({
             </p>
           </div>
 
-          {/* Quick Cash Balance Input */}
+          {/* Portfolio Cash Balance Input con formato de miles */}
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
             <div>
-              <label htmlFor="cash-input" className="block text-xs font-medium text-slate-300">
+              <label htmlFor="cash-input" className="block text-xs font-semibold text-white tracking-wide">
                 Portfolio Cash Balance ($)
               </label>
-              <span className="text-[11px] text-slate-400">Unallocated Broker Cash</span>
+              <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {detectedCash > 0 ? 'TOS Cash & Sweep Vehicle' : 'Auto-detected from Statement'}
+              </span>
             </div>
             <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-semibold">$</span>
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300 font-semibold">$</span>
               <input
                 id="cash-input"
-                type="number"
-                step="any"
+                type="text"
                 value={cashBalanceInput}
                 onChange={(e) => setCashBalanceInput(e.target.value)}
+                onBlur={() => {
+                  const val = parseFloat(cashBalanceInput.replace(/[^0-9.-]+/g, '')) || 0
+                  setCashBalanceInput(formatThousands(val))
+                }}
                 placeholder="0.00"
-                className="w-36 pl-7 pr-3 py-1.5 text-sm font-semibold bg-white/20 text-white placeholder-slate-400 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/30 transition-all text-right"
+                className="w-40 pl-7 pr-3 py-1.5 text-sm font-semibold font-mono bg-white/20 text-white placeholder-slate-400 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/30 transition-all text-right"
               />
             </div>
           </div>

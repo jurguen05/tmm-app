@@ -2,6 +2,7 @@
 
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
+import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
 
@@ -1285,27 +1286,71 @@ export async function getAllTransactions(supabase: SupabaseClient): Promise<Tran
   return allTxs;
 }
 
+// Cache en memoria para evitar descargar repetidamente el mismo archivo de posiciones
+let memoryCashCache: { storagePath: string; cash: number } | null = null;
+
+// Obtener el saldo en efectivo actual ('Cash & Sweep Vehicle') del último archivo Position Statement cargado
+export async function getLatestPositionsCashBalance(supabase: SupabaseClient): Promise<number> {
+  try {
+    const { data: latestFile, error } = await supabase
+      .from('file_uploads')
+      .select('storage_path')
+      .eq('module', 'positions')
+      .eq('is_archived', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !latestFile?.storage_path) {
+      return 0;
+    }
+
+    if (memoryCashCache && memoryCashCache.storagePath === latestFile.storage_path) {
+      return memoryCashCache.cash;
+    }
+
+    const { data: blob, error: downloadError } = await supabase.storage
+      .from('Positions')
+      .download(latestFile.storage_path);
+
+    if (downloadError || !blob) {
+      return 0;
+    }
+
+    const text = await blob.text();
+    const cash = extraerCashBalanceDesdeCsv(text);
+    memoryCashCache = { storagePath: latestFile.storage_path, cash };
+    return cash;
+  } catch {
+    return 0;
+  }
+}
+
 // 33. Cargar todos los orígenes de datos requeridos por el Centro de Control Ejecutivo del Dashboard
 export async function getDashboardExecutiveSourceData(supabase: SupabaseClient): Promise<{
   positions: Position[];
   transactions: Transaction[];
   strategies: Strategy[];
   trades: Trade[];
+  cashBalance: number;
 }> {
-  const [positions, transactions, strategies, trades] = await Promise.all([
+  const [positions, transactions, strategies, trades, cashBalance] = await Promise.all([
     getPositions(supabase).catch(() => []),
     getAllTransactions(supabase).catch(() => []),
     getActiveStrategies(supabase).catch(() => []),
-    getTrades(supabase).catch(() => [])
+    getTrades(supabase).catch(() => []),
+    getLatestPositionsCashBalance(supabase).catch(() => 0)
   ]);
 
   return {
     positions,
     transactions,
     strategies,
-    trades
+    trades,
+    cashBalance
   };
 }
+
 
 // 34. Cargar todos los orígenes de datos requeridos por Portfolio Risk
 export async function getPortfolioRiskSourceData(supabase: SupabaseClient): Promise<{

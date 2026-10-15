@@ -22,8 +22,8 @@ export default async function DashboardPage() {
     }
   )
 
-  // Carga de datos analíticos del Centro de Control Ejecutivo
-  const { positions, transactions, strategies, trades } = await getDashboardExecutiveSourceData(supabase)
+  // Carga de datos analíticos del Centro de Control Ejecutivo (incluyendo Cash & Sweep Vehicle)
+  const { positions, transactions, strategies, trades, cashBalance } = await getDashboardExecutiveSourceData(supabase)
 
   // Cálculo puro server-side para SSR instantáneo de las 4 tablas ejecutivas
   const executiveDashboardData = calcularExecutiveDashboard(
@@ -31,8 +31,9 @@ export default async function DashboardPage() {
     transactions,
     strategies,
     trades,
-    0
+    cashBalance
   )
+
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">

@@ -21,6 +21,26 @@ export interface ParsedPositionRow {
   file_upload_id?: string;
 }
 
+/**
+ * Extrae el saldo en efectivo de la cuenta ('Cash & Sweep Vehicle')
+ * ubicado al pie del archivo PositionStatement.csv de ThinkorSwim.
+ */
+export const extraerCashBalanceDesdeCsv = (csvText: string): number => {
+  if (!csvText) return 0;
+  const lines = csvText.split(/\r?\n/);
+  for (const line of lines) {
+    if (line.toLowerCase().includes('cash & sweep')) {
+      const parts = line.split(',');
+      if (parts.length >= 2) {
+        const valPart = parts.slice(1).join(',');
+        return normalizeNumber(valPart);
+      }
+    }
+  }
+  return 0;
+};
+
+
 export const procesarFilasPosiciones = (
   csvData: any[],
   statementDate: string,
