@@ -334,6 +334,8 @@ export interface PnLDiccionarios {
   dictClosed: Map<string, number>;
   strategyClosedPnL: Map<string, number>;
   strategyOpenPnL: Map<string, number>;
+  hedgeClosedPnL: number;
+  hedgeOpenPnL: number;
 }
 
 /**
@@ -341,6 +343,7 @@ export interface PnLDiccionarios {
  * - Excluye TradeID "1", null, "N/A" y estrategias en EXCLUDED_STRATEGIES
  * - Closed P&L: Agrupa importes por trade_code y acumula en strategyClosedPnL si el status es 'closed' o vacío
  * - Open P&L: Agrupa cash flows abiertos por símbolo, suma Market Value (positions.net_liq) y asigna a la estrategia del símbolo
+ * - Hedge se calcula de forma separada para no distorsionar las métricas de trading
  */
 export const calcularPnLDiccionarios = (
   transactions: Transaction[],
@@ -411,6 +414,9 @@ export const calcularPnLDiccionarios = (
   const symbolCashFlows = new Map<string, number>();
   const symbolStrategy = new Map<string, string>();
 
+  let hedgeClosedPnL = 0;
+  let hedgeOpenPnL = 0;
+
   // Regla de dominio: Un símbolo sólo pertenece a una estrategia a la vez.
   // Mapear la estrategia de cada símbolo a partir de los trades maestros abiertos primero.
   for (const [sym, trList] of openTradesBySymbol.entries()) {
@@ -428,23 +434,36 @@ export const calcularPnLDiccionarios = (
 
     const rawStrat = tr?.strategies?.name || (tr as any)?.strategy || txFirstStrategyByTrade.get(tid) || 'Unassigned';
     const strat = normalizarNombreEstrategia(rawStrat);
-    if (isExcludedStrategy(strat)) continue;
 
     // Estado definitivo: si existe en la tabla trades, su status manda. Si no, fallback a transacciones.
     const effectiveStatus = (tr?.status || txFirstStatusByTrade.get(tid) || '').toLowerCase();
 
-    // Cash flow total del trade (si está persistido en el trade se usa directamente, sino la suma de transacciones)
-    const totalAmt = (tr?.cash_flow !== null && tr?.cash_flow !== undefined)
-      ? Number(tr.cash_flow)
-      : (txAmountsByTrade.get(tid) || 0);
+    // Cash flow total del trade
+    const txSum = txAmountsByTrade.get(tid);
+    const totalAmt = txSum !== undefined ? txSum : (tr?.cash_flow !== null && tr?.cash_flow !== undefined ? Number(tr.cash_flow) : 0);
 
     const sym = (tr?.symbol || txSymbolByTrade.get(tid) || '').trim().toUpperCase();
 
+    if (isExcludedStrategy(strat)) {
+      if (strat.toLowerCase() === 'hedge') {
+        if (effectiveStatus === 'closed' || effectiveStatus === '') {
+          const realizedPnL = txSum !== undefined ? txSum : ((tr?.realized_pnl !== null && tr?.realized_pnl !== undefined)
+            ? Number(tr.realized_pnl)
+            : totalAmt);
+          hedgeClosedPnL += realizedPnL;
+        } else if (effectiveStatus === 'open' && sym) {
+          symbolCashFlows.set(sym, (symbolCashFlows.get(sym) || 0) + totalAmt);
+          symbolStrategy.set(sym, 'Hedge');
+        }
+      }
+      continue;
+    }
+
     if (effectiveStatus === 'closed' || effectiveStatus === '') {
       // Trade Cerrado -> Closed P&L
-      const realizedPnL = (tr?.realized_pnl !== null && tr?.realized_pnl !== undefined)
+      const realizedPnL = txSum !== undefined ? txSum : ((tr?.realized_pnl !== null && tr?.realized_pnl !== undefined)
         ? Number(tr.realized_pnl)
-        : totalAmt;
+        : totalAmt);
 
       dictClosed.set(tid, realizedPnL);
       strategyClosedPnL.set(strat, (strategyClosedPnL.get(strat) || 0) + realizedPnL);
@@ -473,8 +492,6 @@ export const calcularPnLDiccionarios = (
     const marketVal = symbolMarketValues.get(symKey) || 0;
     const openPnLVal = cashFlow + marketVal;
 
-    dictOpen.set(symKey, openPnLVal);
-
     let stName = symbolStrategy.get(symKey);
     if (!stName || stName === 'Unassigned') {
       const openTrs = openTradesBySymbol.get(symKey);
@@ -484,7 +501,10 @@ export const calcularPnLDiccionarios = (
     }
     stName = normalizarNombreEstrategia(stName || 'Unassigned');
 
-    if (!isExcludedStrategy(stName)) {
+    if (stName.toLowerCase() === 'hedge' || symKey === 'QQQ') {
+      hedgeOpenPnL += openPnLVal;
+    } else if (!isExcludedStrategy(stName)) {
+      dictOpen.set(symKey, openPnLVal);
       strategyOpenPnL.set(stName, (strategyOpenPnL.get(stName) || 0) + openPnLVal);
     }
   }
@@ -493,7 +513,9 @@ export const calcularPnLDiccionarios = (
     dictOpen,
     dictClosed,
     strategyClosedPnL,
-    strategyOpenPnL
+    strategyOpenPnL,
+    hedgeClosedPnL,
+    hedgeOpenPnL
   };
 };
 
@@ -503,7 +525,7 @@ export const calcularStrategyPnL = (
   trades?: Trade[],
   strategiesList?: Strategy[]
 ): StrategyPnLSummary => {
-  const { strategyClosedPnL, strategyOpenPnL } = calcularPnLDiccionarios(transactions, positions, trades);
+  const { strategyClosedPnL, strategyOpenPnL, hedgeClosedPnL, hedgeOpenPnL } = calcularPnLDiccionarios(transactions, positions, trades);
 
   // Lista canónica base de estrategias activas estándar
   const standardStrategies = [
@@ -566,7 +588,12 @@ export const calcularStrategyPnL = (
     rows,
     totalClosedPnL: Number(totalClosedPnL.toFixed(2)),
     totalOpenPnL: Number(totalOpenPnL.toFixed(2)),
-    grandTotalPnL: Number(grandTotalPnL.toFixed(2))
+    grandTotalPnL: Number(grandTotalPnL.toFixed(2)),
+    hedge: {
+      closedPnL: Number(hedgeClosedPnL.toFixed(2)),
+      openPnL: Number(hedgeOpenPnL.toFixed(2)),
+      totalPnL: Number((hedgeClosedPnL + hedgeOpenPnL).toFixed(2))
+    }
   };
 };
 

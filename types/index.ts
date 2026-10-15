@@ -184,6 +184,11 @@ export interface StrategyPnLSummary {
   totalClosedPnL: number;
   totalOpenPnL: number;
   grandTotalPnL: number;
+  hedge?: {
+    closedPnL: number;
+    openPnL: number;
+    totalPnL: number;
+  };
 }
 
 export interface AuditMetricColumn {
