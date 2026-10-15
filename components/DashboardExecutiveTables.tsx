@@ -217,11 +217,36 @@ export default function DashboardExecutiveTables({
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50/75 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   <th className="py-3.5 px-4 font-bold text-gray-800">Strategy</th>
-                  <th className="py-3.5 px-4 text-right">Stock Value</th>
-                  <th className="py-3.5 px-4 text-right">CALL Value</th>
-                  <th className="py-3.5 px-4 text-right">PUT Value</th>
-                  <th className="py-3.5 px-4 text-right">Cash Balance</th>
-                  <th className="py-3.5 px-4 text-right font-bold text-gray-800">Portfolio Value</th>
+                  <th className="py-3.5 px-4 text-right">
+                    <div className="flex items-center justify-end">
+                      <span>Stock Value</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right">
+                    <div className="flex items-center justify-end">
+                      <span>CALL Value</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right">
+                    <div className="flex items-center justify-end">
+                      <span>PUT Value</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right">
+                    <div className="flex items-center justify-end">
+                      <span>Cash Balance</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right font-bold text-gray-800">
+                    <div className="flex items-center justify-end">
+                      <span>Portfolio Value</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -240,20 +265,42 @@ export default function DashboardExecutiveTables({
                           {row.strategy}
                         </td>
                         <td className="py-3 px-4 text-right font-medium text-gray-700">
-                          {row.stockValue !== 0 ? formatMoney(row.stockValue) : <span className="text-gray-300">-</span>}
+                          <div className="flex items-center justify-end">
+                            <span className="tabular-nums">
+                              {row.stockValue !== 0 ? formatMoney(row.stockValue) : <span className="text-gray-300">-</span>}
+                            </span>
+                            <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right font-medium text-gray-700">
-                          {row.callValue !== 0 ? formatMoney(row.callValue) : <span className="text-gray-300">-</span>}
+                          <div className="flex items-center justify-end">
+                            <span className="tabular-nums">
+                              {row.callValue !== 0 ? formatMoney(row.callValue) : <span className="text-gray-300">-</span>}
+                            </span>
+                            <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right font-medium text-gray-700">
-                          {row.putValue !== 0 ? formatMoney(row.putValue) : <span className="text-gray-300">-</span>}
+                          <div className="flex items-center justify-end">
+                            <span className="tabular-nums">
+                              {row.putValue !== 0 ? formatMoney(row.putValue) : <span className="text-gray-300">-</span>}
+                            </span>
+                            <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right text-gray-400">
-                          <span className="text-gray-300">-</span>
+                          <div className="flex items-center justify-end">
+                            <span className="text-gray-300">-</span>
+                            <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-gray-900">
-                          {formatMoney(row.portfolioValue)}{' '}
-                          <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(row.allocationPct)})</span>
+                          <div className="flex items-center justify-end">
+                            <span className="tabular-nums">{formatMoney(row.portfolioValue)}</span>
+                            <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-indigo-600 flex-shrink-0 whitespace-nowrap">
+                              ({formatPct(row.allocationPct)})
+                            </span>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -264,15 +311,37 @@ export default function DashboardExecutiveTables({
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         Cash Balance
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
+                      <td className="py-3 px-4 text-right text-gray-300">
+                        <div className="flex items-center justify-end">
+                          <span className="text-gray-300">-</span>
+                          <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-right text-gray-300">
+                        <div className="flex items-center justify-end">
+                          <span className="text-gray-300">-</span>
+                          <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-right text-gray-300">
+                        <div className="flex items-center justify-end">
+                          <span className="text-gray-300">-</span>
+                          <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                        </div>
+                      </td>
                       <td className="py-3 px-4 text-right font-medium text-emerald-700">
-                        {formatMoney(assetAllocation.totalCashBalance)}
+                        <div className="flex items-center justify-end">
+                          <span className="tabular-nums">{formatMoney(assetAllocation.totalCashBalance)}</span>
+                          <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-gray-900">
-                        {formatMoney(assetAllocation.totalCashBalance)}{' '}
-                        <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.cashPct)})</span>
+                        <div className="flex items-center justify-end">
+                          <span className="tabular-nums">{formatMoney(assetAllocation.totalCashBalance)}</span>
+                          <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-indigo-600 flex-shrink-0 whitespace-nowrap">
+                            ({formatPct(assetAllocation.cashPct)})
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   </>
@@ -286,23 +355,42 @@ export default function DashboardExecutiveTables({
                     Total Portfolio
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
-                    {formatMoney(assetAllocation.totalStockValue)}{' '}
-                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.stockPct)})</span>
+                    <div className="flex items-center justify-end">
+                      <span className="tabular-nums">{formatMoney(assetAllocation.totalStockValue)}</span>
+                      <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-indigo-600 flex-shrink-0 whitespace-nowrap">
+                        ({formatPct(assetAllocation.stockPct)})
+                      </span>
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
-                    {formatMoney(assetAllocation.totalCallValue)}{' '}
-                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.callPct)})</span>
+                    <div className="flex items-center justify-end">
+                      <span className="tabular-nums">{formatMoney(assetAllocation.totalCallValue)}</span>
+                      <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-indigo-600 flex-shrink-0 whitespace-nowrap">
+                        ({formatPct(assetAllocation.callPct)})
+                      </span>
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
-                    {formatMoney(assetAllocation.totalPutValue)}{' '}
-                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.putPct)})</span>
+                    <div className="flex items-center justify-end">
+                      <span className="tabular-nums">{formatMoney(assetAllocation.totalPutValue)}</span>
+                      <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-indigo-600 flex-shrink-0 whitespace-nowrap">
+                        ({formatPct(assetAllocation.putPct)})
+                      </span>
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-emerald-700">
-                    {formatMoney(assetAllocation.totalCashBalance)}{' '}
-                    <span className="text-sm font-bold text-emerald-600 ml-1.5">({formatPct(assetAllocation.cashPct)})</span>
+                    <div className="flex items-center justify-end">
+                      <span className="tabular-nums">{formatMoney(assetAllocation.totalCashBalance)}</span>
+                      <span className="w-[84px] pl-1.5 text-left text-sm font-bold text-emerald-600 flex-shrink-0 whitespace-nowrap">
+                        ({formatPct(assetAllocation.cashPct)})
+                      </span>
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-indigo-950 text-base">
-                    {formatMoney(assetAllocation.totalPortfolioValue)}
+                    <div className="flex items-center justify-end">
+                      <span className="tabular-nums">{formatMoney(assetAllocation.totalPortfolioValue)}</span>
+                      <span className="w-[84px] flex-shrink-0" aria-hidden="true" />
+                    </div>
                   </td>
                 </tr>
               </tfoot>
