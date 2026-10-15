@@ -71,29 +71,41 @@ export const resolverEstrategiaDePosicion = (
   const normKey = normalizeUniqueKey(pos.unique_key);
   const sym = (pos.symbol || '').trim().toUpperCase();
 
-  // 1. PRIORIDAD MÁXIMA: Transacciones ABIERTAS ('Open') asociadas a la clave o al símbolo
-  // Las posiciones de la cartera provienen del Position Statement actual, por lo que su
-  // estrategia debe reflejar el trade/transacción abierta vigente.
   const txs = txsByKey.get(normKey) || (sym ? txsByKey.get(sym) : []) || [];
-  const openTxs = txs.filter(t => (t.position_status || '').toLowerCase() === 'open');
+  
+  // 1. PRIORIDAD MÁXIMA: Transacciones ABIERTAS ('Open')
+  // Enriquecemos cada transacción con el estado y estrategia de su trade maestro
+  const txsConEstado = txs.map(t => {
+    const codeNum = t.trade_code ? Number(t.trade_code) : null;
+    const parentTrade = codeNum && tradesByCode.has(codeNum) ? tradesByCode.get(codeNum) : null;
+    const effectiveStatus = (parentTrade?.status || t.position_status || '').toLowerCase();
+    
+    let effectiveStrategyName = '';
+    if (parentTrade?.strategy_id && strategiesById.has(parentTrade.strategy_id)) {
+      effectiveStrategyName = strategiesById.get(parentTrade.strategy_id)!.name;
+    } else if (parentTrade?.strategies?.name) {
+      effectiveStrategyName = parentTrade.strategies.name;
+    } else if (t.strategy_id && strategiesById.has(t.strategy_id)) {
+      effectiveStrategyName = strategiesById.get(t.strategy_id)!.name;
+    } else if (t.strategies?.name) {
+      effectiveStrategyName = t.strategies.name;
+    } else if (t.strategy && t.strategy.trim() !== '') {
+      effectiveStrategyName = t.strategy.trim();
+    }
+
+    return {
+      ...t,
+      effectiveStatus,
+      effectiveStrategyName
+    };
+  });
+
+  const openTxs = txsConEstado.filter(t => t.effectiveStatus === 'open');
 
   if (openTxs.length > 0) {
     const targetTx = openTxs[openTxs.length - 1];
-    if (targetTx.trade_code && tradesByCode.has(Number(targetTx.trade_code))) {
-      const tr = tradesByCode.get(Number(targetTx.trade_code))!;
-      if (tr.strategy_id && strategiesById.has(tr.strategy_id)) {
-        return strategiesById.get(tr.strategy_id)!.name;
-      }
-      if (tr.strategies?.name) return tr.strategies.name;
-    }
-    if (targetTx.strategy_id && strategiesById.has(targetTx.strategy_id)) {
-      return strategiesById.get(targetTx.strategy_id)!.name;
-    }
-    if (targetTx.strategies?.name) {
-      return targetTx.strategies.name;
-    }
-    if (targetTx.strategy && targetTx.strategy.trim() !== '') {
-      return targetTx.strategy.trim();
+    if (targetTx.effectiveStrategyName) {
+      return targetTx.effectiveStrategyName;
     }
   }
 
@@ -119,23 +131,10 @@ export const resolverEstrategiaDePosicion = (
   }
 
   // 4. CUARTA PRIORIDAD: Última transacción disponible en el historial
-  if (txs.length > 0) {
-    const targetTx = txs[txs.length - 1];
-    if (targetTx.trade_code && tradesByCode.has(Number(targetTx.trade_code))) {
-      const tr = tradesByCode.get(Number(targetTx.trade_code))!;
-      if (tr.strategy_id && strategiesById.has(tr.strategy_id)) {
-        return strategiesById.get(tr.strategy_id)!.name;
-      }
-      if (tr.strategies?.name) return tr.strategies.name;
-    }
-    if (targetTx.strategy_id && strategiesById.has(targetTx.strategy_id)) {
-      return strategiesById.get(targetTx.strategy_id)!.name;
-    }
-    if (targetTx.strategies?.name) {
-      return targetTx.strategies.name;
-    }
-    if (targetTx.strategy && targetTx.strategy.trim() !== '') {
-      return targetTx.strategy.trim();
+  if (txsConEstado.length > 0) {
+    const targetTx = txsConEstado[txsConEstado.length - 1];
+    if (targetTx.effectiveStrategyName) {
+      return targetTx.effectiveStrategyName;
     }
   }
 
@@ -166,16 +165,19 @@ export const calcularAssetAllocation = (
   const tradesByCode = new Map<number, Trade>();
   (trades || []).forEach(tr => {
     const nk = normalizeUniqueKey(tr.unique_key);
+    const currentIsOpen = (tr.status || '').toLowerCase() === 'open';
     if (nk) {
       const existing = tradesByKey.get(nk);
-      if (!existing || (tr.status || '').toLowerCase() === 'open') {
+      const existingIsOpen = existing && (existing.status || '').toLowerCase() === 'open';
+      if (!existing || (!existingIsOpen && currentIsOpen)) {
         tradesByKey.set(nk, tr);
       }
     }
     const sym = (tr.symbol || '').trim().toUpperCase();
     if (sym) {
       const existingSym = tradesByKey.get(sym);
-      if (!existingSym || (tr.status || '').toLowerCase() === 'open') {
+      const existingSymIsOpen = existingSym && (existingSym.status || '').toLowerCase() === 'open';
+      if (!existingSym || (!existingSymIsOpen && currentIsOpen)) {
         tradesByKey.set(sym, tr);
       }
     }
