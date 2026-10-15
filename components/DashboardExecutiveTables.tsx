@@ -217,11 +217,11 @@ export default function DashboardExecutiveTables({
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50/75 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   <th className="py-3.5 px-4 font-bold text-gray-800">Strategy</th>
-                  <th className="py-3.5 px-4 text-right">Stock Value</th>
-                  <th className="py-3.5 px-4 text-right">CALL Value</th>
-                  <th className="py-3.5 px-4 text-right">PUT Value</th>
-                  <th className="py-3.5 px-4 text-right">Cash Balance</th>
-                  <th className="py-3.5 pl-4 pr-1 text-right font-bold text-gray-800">Portfolio Value</th>
+                  <th className="py-3.5 px-4 text-center">Stock Value</th>
+                  <th className="py-3.5 px-4 text-center">CALL Value</th>
+                  <th className="py-3.5 px-4 text-center">PUT Value</th>
+                  <th className="py-3.5 px-4 text-center">Cash Balance</th>
+                  <th className="py-3.5 pl-4 pr-1 text-center font-bold text-gray-800">Portfolio Value</th>
                   <th className="py-3.5 pl-1 pr-4 w-20"></th>
                 </tr>
               </thead>
@@ -240,17 +240,17 @@ export default function DashboardExecutiveTables({
                           <span className="w-2 h-2 rounded-full bg-indigo-500" />
                           {row.strategy}
                         </td>
-                        <td className="py-3 px-4 text-right font-medium text-gray-700 tabular-nums">
+                        <td className="py-3 px-4 text-center font-medium text-gray-700 tabular-nums">
                           {row.stockValue !== 0 ? formatIntegerMoney(row.stockValue) : <span className="text-gray-300">-</span>}
                         </td>
-                        <td className="py-3 px-4 text-right font-medium text-gray-700 tabular-nums">
+                        <td className="py-3 px-4 text-center font-medium text-gray-700 tabular-nums">
                           {row.callValue !== 0 ? formatIntegerMoney(row.callValue) : <span className="text-gray-300">-</span>}
                         </td>
-                        <td className="py-3 px-4 text-right font-medium text-gray-700 tabular-nums">
+                        <td className="py-3 px-4 text-center font-medium text-gray-700 tabular-nums">
                           {row.putValue !== 0 ? formatIntegerMoney(row.putValue) : <span className="text-gray-300">-</span>}
                         </td>
-                        <td className="py-3 px-4 text-right text-gray-300">-</td>
-                        <td className="py-3 pl-4 pr-1 text-right font-bold text-gray-900 tabular-nums">
+                        <td className="py-3 px-4 text-center text-gray-300">-</td>
+                        <td className="py-3 pl-4 pr-1 text-center font-bold text-gray-900 tabular-nums">
                           {formatIntegerMoney(row.portfolioValue)}
                         </td>
                         <td className="py-3 pl-1 pr-4 text-left font-bold text-indigo-600 text-sm whitespace-nowrap">
@@ -265,13 +265,13 @@ export default function DashboardExecutiveTables({
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         Cash Balance
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
-                      <td className="py-3 px-4 text-right text-gray-300">-</td>
-                      <td className="py-3 px-4 text-right font-medium text-emerald-700 tabular-nums">
+                      <td className="py-3 px-4 text-center text-gray-300">-</td>
+                      <td className="py-3 px-4 text-center text-gray-300">-</td>
+                      <td className="py-3 px-4 text-center text-gray-300">-</td>
+                      <td className="py-3 px-4 text-center font-medium text-emerald-700 tabular-nums">
                         {formatIntegerMoney(assetAllocation.totalCashBalance)}
                       </td>
-                      <td className="py-3 pl-4 pr-1 text-right font-bold text-gray-900 tabular-nums">
+                      <td className="py-3 pl-4 pr-1 text-center font-bold text-gray-900 tabular-nums">
                         {formatIntegerMoney(assetAllocation.totalCashBalance)}
                       </td>
                       <td className="py-3 pl-1 pr-4 text-left font-bold text-indigo-600 text-sm whitespace-nowrap">
@@ -288,47 +288,47 @@ export default function DashboardExecutiveTables({
                   <td className="py-4 px-4 text-xs font-extrabold uppercase tracking-wider text-gray-900 align-top">
                     Total Portfolio
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-center">
                     <div className="font-extrabold text-sm text-gray-900 tabular-nums">
                       {formatIntegerMoney(assetAllocation.totalStockValue)}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex justify-center">
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                         {formatPct(assetAllocation.stockPct)}
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-center">
                     <div className="font-extrabold text-sm text-gray-900 tabular-nums">
                       {formatIntegerMoney(assetAllocation.totalCallValue)}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex justify-center">
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                         {formatPct(assetAllocation.callPct)}
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-center">
                     <div className="font-extrabold text-sm text-gray-900 tabular-nums">
                       {formatIntegerMoney(assetAllocation.totalPutValue)}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex justify-center">
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                         {formatPct(assetAllocation.putPct)}
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-center">
                     <div className="font-extrabold text-sm text-emerald-700 tabular-nums">
                       {formatIntegerMoney(assetAllocation.totalCashBalance)}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex justify-center">
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                         {formatPct(assetAllocation.cashPct)}
                       </span>
                     </div>
                   </td>
-                  <td className="py-3 pl-4 pr-1 text-right align-top">
+                  <td className="py-3 pl-4 pr-1 text-center align-top">
                     <div className="font-extrabold text-base text-indigo-950 tabular-nums pt-0.5">
                       {formatIntegerMoney(assetAllocation.totalPortfolioValue)}
                     </div>
