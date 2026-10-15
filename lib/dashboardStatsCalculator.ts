@@ -54,7 +54,12 @@ export const clasificarTipoInstrumento = (uniqueKey: string | null | undefined):
 };
 
 /**
- * Helper para resolver el nombre de estrategia de una posición utilizando trades o transacciones
+ * Helper para resolver el nombre de estrategia de una posición utilizando trades o transacciones.
+ * PRIORIDAD:
+ * 1. Transacciones activas abiertas ('Open') asociadas al unique_key o symbol.
+ * 2. Trades maestros activos abiertos ('Open').
+ * 3. Trades maestros generales.
+ * 4. Transacciones históricas (fallback más reciente).
  */
 export const resolverEstrategiaDePosicion = (
   pos: Position,
@@ -64,9 +69,46 @@ export const resolverEstrategiaDePosicion = (
   strategiesById: Map<number, Strategy>
 ): string => {
   const normKey = normalizeUniqueKey(pos.unique_key);
+  const sym = (pos.symbol || '').trim().toUpperCase();
 
-  // 1. Verificar si existe trade maestro por unique_key
-  const tradeFromKey = tradesByKey.get(normKey);
+  // 1. PRIORIDAD MÁXIMA: Transacciones ABIERTAS ('Open') asociadas a la clave o al símbolo
+  // Las posiciones de la cartera provienen del Position Statement actual, por lo que su
+  // estrategia debe reflejar el trade/transacción abierta vigente.
+  const txs = txsByKey.get(normKey) || (sym ? txsByKey.get(sym) : []) || [];
+  const openTxs = txs.filter(t => (t.position_status || '').toLowerCase() === 'open');
+
+  if (openTxs.length > 0) {
+    const targetTx = openTxs[openTxs.length - 1];
+    if (targetTx.trade_code && tradesByCode.has(Number(targetTx.trade_code))) {
+      const tr = tradesByCode.get(Number(targetTx.trade_code))!;
+      if (tr.strategy_id && strategiesById.has(tr.strategy_id)) {
+        return strategiesById.get(tr.strategy_id)!.name;
+      }
+      if (tr.strategies?.name) return tr.strategies.name;
+    }
+    if (targetTx.strategy_id && strategiesById.has(targetTx.strategy_id)) {
+      return strategiesById.get(targetTx.strategy_id)!.name;
+    }
+    if (targetTx.strategies?.name) {
+      return targetTx.strategies.name;
+    }
+    if (targetTx.strategy && targetTx.strategy.trim() !== '') {
+      return targetTx.strategy.trim();
+    }
+  }
+
+  // 2. SEGUNDA PRIORIDAD: Trade maestro ABIERTO ('Open')
+  const tradeFromKey = tradesByKey.get(normKey) || (sym ? tradesByKey.get(sym) : undefined);
+  if (tradeFromKey && (tradeFromKey.status || '').toLowerCase() === 'open') {
+    if (tradeFromKey.strategy_id && strategiesById.has(tradeFromKey.strategy_id)) {
+      return strategiesById.get(tradeFromKey.strategy_id)!.name;
+    }
+    if (tradeFromKey.strategies?.name) {
+      return tradeFromKey.strategies.name;
+    }
+  }
+
+  // 3. TERCERA PRIORIDAD: Trade maestro general si no hay transacciones abiertas
   if (tradeFromKey) {
     if (tradeFromKey.strategy_id && strategiesById.has(tradeFromKey.strategy_id)) {
       return strategiesById.get(tradeFromKey.strategy_id)!.name;
@@ -76,12 +118,9 @@ export const resolverEstrategiaDePosicion = (
     }
   }
 
-  // 2. Buscar en transacciones abiertas de esa unique_key
-  const txs = txsByKey.get(normKey) || [];
-  const openTxs = txs.filter(t => (t.position_status || '').toLowerCase() === 'open');
-  const targetTx = openTxs.length > 0 ? openTxs[openTxs.length - 1] : txs[txs.length - 1];
-
-  if (targetTx) {
+  // 4. CUARTA PRIORIDAD: Última transacción disponible en el historial
+  if (txs.length > 0) {
+    const targetTx = txs[txs.length - 1];
     if (targetTx.trade_code && tradesByCode.has(Number(targetTx.trade_code))) {
       const tr = tradesByCode.get(Number(targetTx.trade_code))!;
       if (tr.strategy_id && strategiesById.has(tr.strategy_id)) {
@@ -126,7 +165,20 @@ export const calcularAssetAllocation = (
   const tradesByKey = new Map<string, Trade>();
   const tradesByCode = new Map<number, Trade>();
   (trades || []).forEach(tr => {
-    if (tr.unique_key) tradesByKey.set(normalizeUniqueKey(tr.unique_key), tr);
+    const nk = normalizeUniqueKey(tr.unique_key);
+    if (nk) {
+      const existing = tradesByKey.get(nk);
+      if (!existing || (tr.status || '').toLowerCase() === 'open') {
+        tradesByKey.set(nk, tr);
+      }
+    }
+    const sym = (tr.symbol || '').trim().toUpperCase();
+    if (sym) {
+      const existingSym = tradesByKey.get(sym);
+      if (!existingSym || (tr.status || '').toLowerCase() === 'open') {
+        tradesByKey.set(sym, tr);
+      }
+    }
     if (tr.trade_code !== null && tr.trade_code !== undefined) {
       tradesByCode.set(Number(tr.trade_code), tr);
     }
@@ -135,9 +187,17 @@ export const calcularAssetAllocation = (
   const txsByKey = new Map<string, Transaction[]>();
   (transactions || []).forEach(tx => {
     const nk = normalizeUniqueKey(tx.unique_key);
-    const arr = txsByKey.get(nk) || [];
-    arr.push(tx);
-    txsByKey.set(nk, arr);
+    if (nk) {
+      const arr = txsByKey.get(nk) || [];
+      arr.push(tx);
+      txsByKey.set(nk, arr);
+    }
+    const sym = (tx.symbol || '').trim().toUpperCase();
+    if (sym && sym !== nk) {
+      const arrSym = txsByKey.get(sym) || [];
+      arrSym.push(tx);
+      txsByKey.set(sym, arrSym);
+    }
   });
 
   // Mapa acumulador por nombre de estrategia
