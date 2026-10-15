@@ -70,8 +70,18 @@ export const resolverEstrategiaDePosicion = (
 ): string => {
   const normKey = normalizeUniqueKey(pos.unique_key);
   const sym = (pos.symbol || '').trim().toUpperCase();
+  const tipoPos = clasificarTipoInstrumento(pos.unique_key);
+  const isOptionPos = tipoPos === 'CALL' || tipoPos === 'PUT';
 
-  const txs = txsByKey.get(normKey) || (sym ? txsByKey.get(sym) : []) || [];
+  const rawTxs = txsByKey.get(normKey) || (sym ? txsByKey.get(sym) : []) || [];
+  
+  // Regla fundamental de dominio:
+  // Si la posición es de ACCIONES (Stock), SOLO debe correlacionarse con transacciones de acciones ('Stock').
+  // Jamás debe heredar la estrategia de una opción (CALL/PUT) del mismo ticker (ej: PLTR acción no debe heredar una opción BBO).
+  // Si la posición es una OPCIÓN, debe correlacionarse con la opción correspondiente.
+  const txs = isOptionPos
+    ? rawTxs.filter(t => (t.instrument || '').toLowerCase() === 'option' || normalizeUniqueKey(t.unique_key) === normKey)
+    : rawTxs.filter(t => (t.instrument || '').toLowerCase() === 'stock' || !t.unique_key || !t.unique_key.includes(' '));
   
   // 1. PRIORIDAD MÁXIMA: Transacciones ABIERTAS ('Open')
   // Enriquecemos cada transacción con el estado y estrategia de su trade maestro
@@ -109,8 +119,12 @@ export const resolverEstrategiaDePosicion = (
     }
   }
 
-  // 2. SEGUNDA PRIORIDAD: Trade maestro ABIERTO ('Open')
-  const tradeFromKey = tradesByKey.get(normKey) || (sym ? tradesByKey.get(sym) : undefined);
+  // 2. SEGUNDA PRIORIDAD: Trade maestro ABIERTO ('Open') respetando tipo de instrumento
+  const rawTrade = tradesByKey.get(normKey) || (sym ? tradesByKey.get(sym) : undefined);
+  const tradeFromKey = isOptionPos
+    ? rawTrade
+    : (rawTrade && !rawTrade.unique_key.includes(' C') && !rawTrade.unique_key.includes(' P') ? rawTrade : undefined);
+
   if (tradeFromKey && (tradeFromKey.status || '').toLowerCase() === 'open') {
     if (tradeFromKey.strategy_id && strategiesById.has(tradeFromKey.strategy_id)) {
       return strategiesById.get(tradeFromKey.strategy_id)!.name;
