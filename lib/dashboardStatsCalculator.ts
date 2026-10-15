@@ -705,7 +705,11 @@ export const calcularRiskMultiples = (
         rMultiple: Number(rMultiple.toFixed(2))
       };
     })
-    .sort((a, b) => b.totalPnL - a.totalPnL);
+    .sort((a, b) => {
+      if (a.strategy === 'Unassigned') return 1;
+      if (b.strategy === 'Unassigned') return -1;
+      return a.strategy.localeCompare(b.strategy);
+    });
 
   const portfolioR = totalInitialInvestment > 0 ? (totalPnL / totalInitialInvestment) : 0;
   const averageInitialInvestment = closedTradesCount > 0 ? (totalInitialInvestment / closedTradesCount) : 0;
