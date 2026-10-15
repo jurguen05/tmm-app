@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState } from 'react'
 import {
   ExecutiveDashboardData,
   Position,
@@ -8,7 +8,7 @@ import {
   Strategy,
   Trade
 } from '../types'
-import { calcularAssetAllocation, EXCLUDED_STRATEGIES } from '../lib/dashboardStatsCalculator'
+import { EXCLUDED_STRATEGIES } from '../lib/dashboardStatsCalculator'
 
 interface DashboardExecutiveTablesProps {
   initialData: ExecutiveDashboardData
@@ -79,13 +79,17 @@ export const parseNumberEsAR = (val: string | number | null | undefined): number
     str = str.replace(/\./g, '').replace(',', '.')
   } else if (str.includes(',')) {
     str = str.replace(',', '.')
+  } else if (str.includes('.')) {
+    if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
+      str = str.replace(/\./g, '')
+    }
   }
   const clean = str.replace(/[^0-9.-]+/g, '')
   const num = parseFloat(clean)
   return isNaN(num) ? 0 : num
 }
 
-/** Formateador entero con separadores de miles para inputs en formato es-AR sin decimales (ej: 17.380) */
+/** Formateador entero con separadores de miles para formato es-AR sin decimales (ej: 17.380) */
 const formatThousands = (val: number | string): string => {
   if (val === '' || val === null || val === undefined) return '0'
   const num = typeof val === 'number' ? val : parseNumberEsAR(val)
@@ -101,22 +105,8 @@ export default function DashboardExecutiveTables({
   trades,
   transactions
 }: DashboardExecutiveTablesProps) {
-  // Estado local para permitir ajustar el saldo en efectivo de la cartera (Cash Balance)
-  // Inicializado con formato de miles sin decimales a partir de 'Cash & Sweep Vehicle' (ej: 17.380)
-  const detectedCash = initialData.assetAllocation.totalCashBalance
-  const [cashBalanceInput, setCashBalanceInput] = useState<string>(() => {
-    return detectedCash > 0 ? formatThousands(detectedCash) : '0'
-  })
   const [activeTab, setActiveTab] = useState<'all' | 'allocation' | 'pnl' | 'audit' | 'risk'>('all')
-
-  // Recalcular Asset Allocation si el usuario ajusta el Cash Balance
-  const assetAllocation = useMemo(() => {
-    const cashVal = parseNumberEsAR(cashBalanceInput)
-    return calcularAssetAllocation(positions, strategies, trades, transactions, cashVal)
-  }, [cashBalanceInput, positions, strategies, trades, transactions])
-
-
-  const { strategyPnL, auditMetrics, riskMultiples } = initialData
+  const { assetAllocation, strategyPnL, auditMetrics, riskMultiples } = initialData
 
   return (
     <div className="space-y-8">
@@ -133,29 +123,6 @@ export default function DashboardExecutiveTables({
             <p className="text-slate-300 text-sm mt-1 max-w-2xl">
               Real-time portfolio analytics, strategic asset allocation, audited performance metrics, and risk multiples.
             </p>
-          </div>
-
-          {/* Portfolio Cash Balance Input con formato de miles (17.379,61) sin símbolo $ */}
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <div>
-              <label htmlFor="cash-input" className="block text-xs font-semibold text-white tracking-wide">
-                Portfolio Cash Balance
-              </label>
-            </div>
-            <div className="relative">
-              <input
-                id="cash-input"
-                type="text"
-                value={cashBalanceInput}
-                onChange={(e) => setCashBalanceInput(e.target.value)}
-                onBlur={() => {
-                  const val = parseNumberEsAR(cashBalanceInput)
-                  setCashBalanceInput(formatThousands(val))
-                }}
-                placeholder="0"
-                className="w-40 px-3 py-1.5 text-sm font-semibold font-mono bg-white/20 text-white placeholder-slate-400 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/30 transition-all text-right"
-              />
-            </div>
           </div>
         </div>
 
@@ -286,16 +253,16 @@ export default function DashboardExecutiveTables({
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-gray-900">
                           {formatMoney(row.portfolioValue)}{' '}
-                          <span className="text-xs font-semibold text-indigo-600 ml-1">({formatPct(row.allocationPct)})</span>
+                          <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(row.allocationPct)})</span>
                         </td>
                       </tr>
                     ))}
 
-                    {/* Fila de Cash */}
+                    {/* Fila de Cash Balance */}
                     <tr className="hover:bg-slate-50/80 transition-colors bg-emerald-50/20">
                       <td className="py-3 px-4 font-semibold text-gray-900 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        Cash
+                        Cash Balance
                       </td>
                       <td className="py-3 px-4 text-right text-gray-300">-</td>
                       <td className="py-3 px-4 text-right text-gray-300">-</td>
@@ -305,7 +272,7 @@ export default function DashboardExecutiveTables({
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-gray-900">
                         {formatMoney(assetAllocation.totalCashBalance)}{' '}
-                        <span className="text-xs font-semibold text-indigo-600 ml-1">({formatPct(assetAllocation.cashPct)})</span>
+                        <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.cashPct)})</span>
                       </td>
                     </tr>
                   </>
@@ -320,23 +287,22 @@ export default function DashboardExecutiveTables({
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
                     {formatMoney(assetAllocation.totalStockValue)}{' '}
-                    <span className="text-xs font-semibold text-indigo-600 ml-1">({formatPct(assetAllocation.stockPct)})</span>
+                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.stockPct)})</span>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
                     {formatMoney(assetAllocation.totalCallValue)}{' '}
-                    <span className="text-xs font-semibold text-indigo-600 ml-1">({formatPct(assetAllocation.callPct)})</span>
+                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.callPct)})</span>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-gray-900">
                     {formatMoney(assetAllocation.totalPutValue)}{' '}
-                    <span className="text-xs font-semibold text-indigo-600 ml-1">({formatPct(assetAllocation.putPct)})</span>
+                    <span className="text-sm font-bold text-indigo-600 ml-1.5">({formatPct(assetAllocation.putPct)})</span>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-emerald-700">
                     {formatMoney(assetAllocation.totalCashBalance)}{' '}
-                    <span className="text-xs font-semibold text-emerald-600 ml-1">({formatPct(assetAllocation.cashPct)})</span>
+                    <span className="text-sm font-bold text-emerald-600 ml-1.5">({formatPct(assetAllocation.cashPct)})</span>
                   </td>
                   <td className="py-3.5 px-4 text-right font-extrabold text-indigo-950 text-base">
-                    {formatMoney(assetAllocation.totalPortfolioValue)}{' '}
-                    <span className="text-xs font-semibold text-indigo-600 ml-1">(100,00%)</span>
+                    {formatMoney(assetAllocation.totalPortfolioValue)}
                   </td>
                 </tr>
               </tfoot>
