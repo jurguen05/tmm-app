@@ -18,15 +18,15 @@ interface DashboardExecutiveTablesProps {
   transactions: Transaction[]
 }
 
-/** Formateador de moneda con separador de miles: $ 1.234,56 o -$ 1.234,56 */
+/** Formateador de moneda con separador de miles sin símbolo $: 1.234,56 o -1.234,56 */
 export const formatMoney = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '$ 0,00'
+  if (val === null || val === undefined || isNaN(val)) return '0,00'
   const isNeg = val < 0
   const formatted = new Intl.NumberFormat('es-AR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(Math.abs(val))
-  return isNeg ? `-$ ${formatted}` : `$ ${formatted}`
+  return isNeg ? `-${formatted}` : formatted
 }
 
 /** Formateador de porcentaje: 12,34% */
@@ -58,12 +58,26 @@ export const formatRatio = (val: number | null | undefined): string => {
   }).format(val)
 }
 
-/** Formateador con separadores de miles para inputs: 17,379.61 */
+/** Parsea un string en formato es-AR (17.379,61) a número float estándar */
+export const parseNumberEsAR = (val: string | number | null | undefined): number => {
+  if (val === null || val === undefined || val === '') return 0
+  if (typeof val === 'number') return isNaN(val) ? 0 : val
+  let str = String(val).trim()
+  if (str.includes(',') && str.includes('.')) {
+    str = str.replace(/\./g, '').replace(',', '.')
+  } else if (str.includes(',')) {
+    str = str.replace(',', '.')
+  }
+  const clean = str.replace(/[^0-9.-]+/g, '')
+  const num = parseFloat(clean)
+  return isNaN(num) ? 0 : num
+}
+
+/** Formateador con separadores de miles para inputs en formato es-AR (ej: 17.379,61) */
 const formatThousands = (val: number | string): string => {
-  if (val === '' || val === null || val === undefined) return '0.00'
-  const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[^0-9.-]+/g, ''))
-  if (isNaN(num)) return '0.00'
-  return new Intl.NumberFormat('en-US', {
+  if (val === '' || val === null || val === undefined) return '0,00'
+  const num = typeof val === 'number' ? val : parseNumberEsAR(val)
+  return new Intl.NumberFormat('es-AR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(num)
@@ -77,16 +91,16 @@ export default function DashboardExecutiveTables({
   transactions
 }: DashboardExecutiveTablesProps) {
   // Estado local para permitir ajustar el saldo en efectivo de la cartera (Cash Balance)
-  // Inicializado con formato de miles a partir del valor de 'Cash & Sweep Vehicle'
+  // Inicializado con formato de miles a partir del valor de 'Cash & Sweep Vehicle' (ej: 17.379,61)
   const detectedCash = initialData.assetAllocation.totalCashBalance
   const [cashBalanceInput, setCashBalanceInput] = useState<string>(() => {
-    return detectedCash > 0 ? formatThousands(detectedCash) : '0.00'
+    return detectedCash > 0 ? formatThousands(detectedCash) : '0,00'
   })
   const [activeTab, setActiveTab] = useState<'all' | 'allocation' | 'pnl' | 'audit' | 'risk'>('all')
 
   // Recalcular Asset Allocation si el usuario ajusta el Cash Balance
   const assetAllocation = useMemo(() => {
-    const cashVal = parseFloat(cashBalanceInput.replace(/[^0-9.-]+/g, '')) || 0
+    const cashVal = parseNumberEsAR(cashBalanceInput)
     return calcularAssetAllocation(positions, strategies, trades, transactions, cashVal)
   }, [cashBalanceInput, positions, strategies, trades, transactions])
 
@@ -109,34 +123,30 @@ export default function DashboardExecutiveTables({
             </p>
           </div>
 
-          {/* Portfolio Cash Balance Input con formato de miles */}
+          {/* Portfolio Cash Balance Input con formato de miles (17.379,61) sin símbolo $ */}
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 flex flex-col sm:flex-row items-start sm:items-center gap-3">
             <div>
               <label htmlFor="cash-input" className="block text-xs font-semibold text-white tracking-wide">
-                Portfolio Cash Balance ($)
+                Portfolio Cash Balance
               </label>
-              <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                {detectedCash > 0 ? 'TOS Cash & Sweep Vehicle' : 'Auto-detected from Statement'}
-              </span>
             </div>
             <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300 font-semibold">$</span>
               <input
                 id="cash-input"
                 type="text"
                 value={cashBalanceInput}
                 onChange={(e) => setCashBalanceInput(e.target.value)}
                 onBlur={() => {
-                  const val = parseFloat(cashBalanceInput.replace(/[^0-9.-]+/g, '')) || 0
+                  const val = parseNumberEsAR(cashBalanceInput)
                   setCashBalanceInput(formatThousands(val))
                 }}
-                placeholder="0.00"
-                className="w-40 pl-7 pr-3 py-1.5 text-sm font-semibold font-mono bg-white/20 text-white placeholder-slate-400 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/30 transition-all text-right"
+                placeholder="0,00"
+                className="w-40 px-3 py-1.5 text-sm font-semibold font-mono bg-white/20 text-white placeholder-slate-400 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/30 transition-all text-right"
               />
             </div>
           </div>
         </div>
+
 
         {/* Executive Tab Filter Bar */}
         <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t border-white/10">
@@ -502,11 +512,11 @@ export default function DashboardExecutiveTables({
                   </td>
                 </tr>
 
-                {/* Win/Loss Ratio ($) */}
+                {/* Win/Loss Ratio */}
                 <tr className="hover:bg-slate-50/80 transition-colors">
                   <td className="py-3 px-4 font-semibold text-gray-800 flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                    Win/Loss Ratio ($)
+                    Win/Loss Ratio
                   </td>
                   <td className="py-3 px-4 text-right font-semibold text-gray-800">
                     {formatRatio(auditMetrics.closed.winLossRatio)}
@@ -672,8 +682,8 @@ export default function DashboardExecutiveTables({
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50/75 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   <th className="py-3.5 px-4 font-bold text-gray-800">Strategy</th>
-                  <th className="py-3.5 px-4 text-right">Total P&L ($)</th>
-                  <th className="py-3.5 px-4 text-right">Initial Investment ($)</th>
+                  <th className="py-3.5 px-4 text-right">Total P&L</th>
+                  <th className="py-3.5 px-4 text-right">Initial Investment</th>
                   <th className="py-3.5 px-4 text-right font-bold text-purple-900">R Multiple</th>
                 </tr>
               </thead>
