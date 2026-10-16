@@ -109,124 +109,127 @@ export default function TransactionsTable({
                     }`}
                   >
                     <td colSpan={6} className="px-3.5 py-2">
-                      <div className="flex flex-wrap items-center justify-start gap-3.5">
-                        {/* Flecha desplegable */}
-                        <span
-                          className={`inline-block text-xs font-bold transition-transform ${
-                            isExpanded ? 'rotate-90 text-indigo-700' : 'text-slate-500'
-                          }`}
-                        >
-                          ▶
-                        </span>
-
-                        {/* 1. trade_code (sin la palabra CODE) */}
-                        <span className="text-sm font-bold text-indigo-700 tracking-tight min-w-[2rem]">
-                          {group.trade_code || '-'}
-                        </span>
-
-                        {/* 2. Symbol */}
-                        <span className="text-sm font-bold text-gray-900 min-w-[3rem]">
-                          {group.symbol}
-                        </span>
-
-                        {/* 3. Strategy */}
-                        <div onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={group.strategy_id || ''}
-                            onChange={(e) => {
-                              const nuevoId = e.target.value ? Number(e.target.value) : null
-                              onActualizarTradeGroup(group, 'strategy_id', nuevoId)
-                            }}
-                            className="px-2 py-0.5 border border-gray-300 rounded text-xs font-medium bg-white text-gray-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      <div className="flex items-center justify-between gap-4">
+                        {/* Lado Izquierdo: Flecha + Code + Symbol + Strategy + Stock Entry Price + Status (mismo fondo blanco y en negrita) */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Flecha desplegable */}
+                          <span
+                            className={`inline-block text-xs font-bold transition-transform ${
+                              isExpanded ? 'rotate-90 text-indigo-700' : 'text-slate-500'
+                            }`}
                           >
-                            <option value="">Select strategy...</option>
-                            {estrategias.map((est) => (
-                              <option key={est.id} value={est.id}>
-                                {est.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                            ▶
+                          </span>
 
-                        {/* 4. Stock Entry Price (editable solo si la primera compra fue Option) */}
-                        <div
-                          className="flex items-center gap-1.5 text-xs"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="text-gray-500 font-medium">Stock Entry Price:</span>
-                          {(() => {
-                            // Encontrar la primera transacción de compra (o la más antigua del trade)
-                            const buys = group.transactions.filter(
-                              (tx) => /bot|buy/i.test(tx.action || '') || tx.amount < 0
-                            )
-                            const firstTx = buys.length > 0 ? buys[buys.length - 1] : group.transactions[group.transactions.length - 1]
-                            const esEditable = firstTx ? firstTx.instrument === 'Option' : group.instrument === 'Option'
+                          {/* 1. trade_code */}
+                          <span className="text-sm font-bold text-indigo-700 tracking-tight min-w-[2rem]">
+                            {group.trade_code || '-'}
+                          </span>
 
-                            if (esEditable) {
-                              if (editingPriceTarget === bannerEditKey) {
+                          {/* 2. Symbol */}
+                          <span className="text-sm font-bold text-gray-900 min-w-[3rem]">
+                            {group.symbol}
+                          </span>
+
+                          {/* 3. Strategy */}
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <select
+                              value={group.strategy_id || ''}
+                              onChange={(e) => {
+                                const nuevoId = e.target.value ? Number(e.target.value) : null
+                                onActualizarTradeGroup(group, 'strategy_id', nuevoId)
+                              }}
+                              className="px-2.5 py-1 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900 shadow-2xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            >
+                              <option value="">Select strategy...</option>
+                              {estrategias.map((est) => (
+                                <option key={est.id} value={est.id}>
+                                  {est.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* 4. Stock Entry Price */}
+                          <div
+                            className="flex items-center gap-1.5 text-xs font-bold"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span className="text-gray-600 font-bold">Stock Entry Price:</span>
+                            {(() => {
+                              const buys = group.transactions.filter(
+                                (tx) => /bot|buy/i.test(tx.action || '') || tx.amount < 0
+                              )
+                              const firstTx = buys.length > 0 ? buys[buys.length - 1] : group.transactions[group.transactions.length - 1]
+                              const esEditable = firstTx ? firstTx.instrument === 'Option' : group.instrument === 'Option'
+
+                              if (esEditable) {
+                                if (editingPriceTarget === bannerEditKey) {
+                                  return (
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      autoFocus
+                                      value={tempPriceValue}
+                                      onChange={(e) => setTempPriceValue(e.target.value)}
+                                      onBlur={() => handleCommitEditPrice(group)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleCommitEditPrice(group)
+                                        if (e.key === 'Escape') setEditingPriceTarget(null)
+                                      }}
+                                      placeholder="0.00"
+                                      className="w-20 px-2 py-0.5 border border-indigo-500 rounded text-xs font-bold text-right bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  )
+                                }
                                 return (
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    autoFocus
-                                    value={tempPriceValue}
-                                    onChange={(e) => setTempPriceValue(e.target.value)}
-                                    onBlur={() => handleCommitEditPrice(group)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleCommitEditPrice(group)
-                                      if (e.key === 'Escape') setEditingPriceTarget(null)
-                                    }}
-                                    placeholder="0.00"
-                                    className="w-20 px-1.5 py-0.5 border border-indigo-500 rounded text-xs font-semibold text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleStartEditPrice(bannerEditKey, group.stock_entry_price)
+                                    }
+                                    className="px-2.5 py-0.5 rounded bg-white border border-gray-300 font-bold text-gray-900 hover:border-indigo-500 hover:text-indigo-700 transition cursor-pointer"
+                                    title="Click to edit Stock Entry Price (Option trade)"
+                                  >
+                                    {group.stock_entry_price
+                                      ? formatearMoneda(group.stock_entry_price)
+                                      : '0,00'}
+                                  </button>
                                 )
                               }
+
                               return (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleStartEditPrice(bannerEditKey, group.stock_entry_price)
-                                  }
-                                  className="px-2 py-0.5 rounded bg-white border border-gray-300 font-semibold text-gray-900 hover:border-indigo-500 hover:text-indigo-700 transition cursor-pointer"
-                                  title="Click to edit Stock Entry Price (Option trade)"
+                                <span
+                                  className="px-2.5 py-0.5 rounded bg-white border border-gray-300 font-bold text-gray-900 select-none cursor-default"
+                                  title="Calculated from Stock fill price (read-only)"
                                 >
                                   {group.stock_entry_price
                                     ? formatearMoneda(group.stock_entry_price)
                                     : '0,00'}
-                                </button>
+                                </span>
                               )
-                            }
+                            })()}
+                          </div>
 
-                            // Si la primera compra fue Stock, ya viene dado del precio de la acción y es de solo lectura
-                            return (
-                              <span
-                                className="px-2 py-0.5 rounded bg-gray-100 border border-gray-200 font-semibold text-gray-700 select-none cursor-default"
-                                title="Calculated from Stock fill price (read-only)"
-                              >
-                                {group.stock_entry_price
-                                  ? formatearMoneda(group.stock_entry_price)
-                                  : '0,00'}
-                              </span>
-                            )
-                          })()}
+                          {/* Status */}
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded text-xs font-bold border ${
+                              group.status === 'Open'
+                                ? 'bg-white text-green-700 border-green-300'
+                                : 'bg-white text-gray-700 border-gray-300'
+                            }`}
+                          >
+                            {group.status}
+                          </span>
                         </div>
 
-                        {/* 5. Fills */}
-                        <span className="px-2 py-0.5 rounded bg-white border border-gray-300 text-xs font-medium text-gray-600">
-                          {group.transactions.length}{' '}
-                          {group.transactions.length === 1 ? 'fill' : 'fills'}
-                        </span>
-
-                        {/* Status */}
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                            group.status === 'Open'
-                              ? 'bg-green-100 text-green-800 border-green-300'
-                              : 'bg-gray-200 text-gray-700 border-gray-300'
-                          }`}
-                        >
-                          {group.status}
-                        </span>
+                        {/* Lado Derecho: Fills alineado hacia la derecha */}
+                        <div className="pr-2">
+                          <span className="px-2.5 py-0.5 rounded bg-white border border-gray-300 text-xs font-bold text-gray-800 whitespace-nowrap shadow-2xs">
+                            {group.transactions.length}{' '}
+                            {group.transactions.length === 1 ? 'fill' : 'fills'}
+                          </span>
+                        </div>
                       </div>
                     </td>
                   </tr>
