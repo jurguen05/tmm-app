@@ -148,41 +148,67 @@ export default function TransactionsTable({
                           </select>
                         </div>
 
-                        {/* 4. Stock Entry Price (solo en el encabezado) */}
+                        {/* 4. Stock Entry Price (editable solo si la primera compra fue Option) */}
                         <div
                           className="flex items-center gap-1.5 text-xs"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <span className="text-gray-500 font-medium">Stock Entry Price:</span>
-                          {editingPriceTarget === bannerEditKey ? (
-                            <input
-                              type="number"
-                              step="0.01"
-                              autoFocus
-                              value={tempPriceValue}
-                              onChange={(e) => setTempPriceValue(e.target.value)}
-                              onBlur={() => handleCommitEditPrice(group)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleCommitEditPrice(group)
-                                if (e.key === 'Escape') setEditingPriceTarget(null)
-                              }}
-                              placeholder="0.00"
-                              className="w-20 px-1.5 py-0.5 border border-indigo-500 rounded text-xs font-semibold text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleStartEditPrice(bannerEditKey, group.stock_entry_price)
+                          {(() => {
+                            // Encontrar la primera transacción de compra (o la más antigua del trade)
+                            const buys = group.transactions.filter(
+                              (tx) => /bot|buy/i.test(tx.action || '') || tx.amount < 0
+                            )
+                            const firstTx = buys.length > 0 ? buys[buys.length - 1] : group.transactions[group.transactions.length - 1]
+                            const esEditable = firstTx ? firstTx.instrument === 'Option' : group.instrument === 'Option'
+
+                            if (esEditable) {
+                              if (editingPriceTarget === bannerEditKey) {
+                                return (
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    autoFocus
+                                    value={tempPriceValue}
+                                    onChange={(e) => setTempPriceValue(e.target.value)}
+                                    onBlur={() => handleCommitEditPrice(group)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleCommitEditPrice(group)
+                                      if (e.key === 'Escape') setEditingPriceTarget(null)
+                                    }}
+                                    placeholder="0.00"
+                                    className="w-20 px-1.5 py-0.5 border border-indigo-500 rounded text-xs font-semibold text-right bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                  />
+                                )
                               }
-                              className="px-2 py-0.5 rounded bg-white border border-gray-300 font-semibold text-gray-900 hover:border-indigo-500 hover:text-indigo-700 transition cursor-pointer"
-                              title="Click to edit Stock Entry Price"
-                            >
-                              {group.stock_entry_price
-                                ? formatearMoneda(group.stock_entry_price)
-                                : '0,00'}
-                            </button>
-                          )}
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleStartEditPrice(bannerEditKey, group.stock_entry_price)
+                                  }
+                                  className="px-2 py-0.5 rounded bg-white border border-gray-300 font-semibold text-gray-900 hover:border-indigo-500 hover:text-indigo-700 transition cursor-pointer"
+                                  title="Click to edit Stock Entry Price (Option trade)"
+                                >
+                                  {group.stock_entry_price
+                                    ? formatearMoneda(group.stock_entry_price)
+                                    : '0,00'}
+                                </button>
+                              )
+                            }
+
+                            // Si la primera compra fue Stock, ya viene dado del precio de la acción y es de solo lectura
+                            return (
+                              <span
+                                className="px-2 py-0.5 rounded bg-gray-100 border border-gray-200 font-semibold text-gray-700 select-none cursor-default"
+                                title="Calculated from Stock fill price (read-only)"
+                              >
+                                {group.stock_entry_price
+                                  ? formatearMoneda(group.stock_entry_price)
+                                  : '0,00'}
+                              </span>
+                            )
+                          })()}
                         </div>
 
                         {/* 5. Fills */}
