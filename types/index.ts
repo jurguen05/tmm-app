@@ -25,6 +25,7 @@ export interface Transaction {
   fees?: number;
   strategy?: string | null;
   strategies?: { name: string } | null;
+  position_status?: 'Open' | 'Closed' | string | null;
   created_at?: string;
   file_upload_id?: string;
   account_id?: string;

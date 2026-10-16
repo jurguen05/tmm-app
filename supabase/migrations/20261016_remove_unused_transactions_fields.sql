@@ -117,3 +117,11 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 4. Asegurar que el trigger esté vinculado en transactions
+DROP TRIGGER IF EXISTS trg_assign_transaction_data ON transactions;
+CREATE TRIGGER trg_assign_transaction_data
+BEFORE INSERT OR UPDATE OF unique_key, symbol, trade_code
+ON transactions
+FOR EACH ROW
+EXECUTE FUNCTION assign_transaction_data();

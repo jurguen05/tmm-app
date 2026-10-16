@@ -49,10 +49,7 @@ SELECT
         MIN(t.date) FILTER (WHERE t.action ILIKE '%buy%' OR t.amount < 0),
         MIN(t.date)
     )::DATE AS first_buy_date,
-    CASE 
-        WHEN BOOL_OR(LOWER(t.position_status) = 'open') THEN 'Open'
-        ELSE 'Closed'
-    END AS status,
+    'Open' AS status,
     FALSE AS weekend_trader_flag,
     (ARRAY_AGG(t.account_id))[1] AS account_id
 FROM transactions t
@@ -138,7 +135,7 @@ BEGIN
         );
 
         -- Ensure parent trade exists in 'trades'
-        SELECT trade_code, symbol, unique_key, instrument, strategy_id, stock_entry_price, status
+        SELECT trade_code, symbol, unique_key, instrument, status
         INTO v_existing_trade
         FROM trades
         WHERE trade_code = NEW.trade_code
@@ -150,8 +147,6 @@ BEGIN
                 symbol,
                 unique_key,
                 instrument,
-                strategy_id,
-                stock_entry_price,
                 first_buy_date,
                 status,
                 account_id
@@ -160,10 +155,8 @@ BEGIN
                 COALESCE(NEW.symbol, 'UNKNOWN'),
                 COALESCE(NEW.unique_key, NEW.symbol, 'UNKNOWN'),
                 COALESCE(NEW.instrument, 'Stock'),
-                NEW.strategy_id,
-                COALESCE(NEW.stock_entry_price, CASE WHEN NEW.instrument = 'Stock' THEN NEW.price ELSE NULL END),
                 NEW.date::DATE,
-                COALESCE(NEW.position_status, 'Open'),
+                'Open',
                 NEW.account_id
             )
             ON CONFLICT (trade_code) DO NOTHING;
@@ -171,16 +164,13 @@ BEGIN
             NEW.symbol := COALESCE(NEW.symbol, v_existing_trade.symbol);
             NEW.unique_key := COALESCE(NEW.unique_key, v_existing_trade.unique_key);
             NEW.instrument := COALESCE(NEW.instrument, v_existing_trade.instrument);
-            NEW.strategy_id := COALESCE(NEW.strategy_id, v_existing_trade.strategy_id);
-            NEW.stock_entry_price := COALESCE(NEW.stock_entry_price, v_existing_trade.stock_entry_price);
-            NEW.position_status := COALESCE(v_existing_trade.status, NEW.position_status, 'Open');
         END IF;
 
         RETURN NEW;
     END IF;
 
     -- When NEW.trade_code IS NULL: look up an active ('Open') trade in master table 'trades' by unique_key
-    SELECT trade_code, symbol, unique_key, instrument, strategy_id, stock_entry_price, status
+    SELECT trade_code, symbol, unique_key, instrument, status
     INTO v_existing_trade
     FROM trades
     WHERE unique_key = NEW.unique_key
@@ -194,9 +184,6 @@ BEGIN
         NEW.symbol := COALESCE(NEW.symbol, v_existing_trade.symbol);
         NEW.unique_key := COALESCE(NEW.unique_key, v_existing_trade.unique_key);
         NEW.instrument := COALESCE(NEW.instrument, v_existing_trade.instrument);
-        NEW.strategy_id := COALESCE(NEW.strategy_id, v_existing_trade.strategy_id);
-        NEW.stock_entry_price := COALESCE(NEW.stock_entry_price, v_existing_trade.stock_entry_price);
-        NEW.position_status := 'Open';
     ELSE
         -- Generate new trade_code in 'trades' first
         PERFORM setval(
@@ -215,8 +202,6 @@ BEGIN
             symbol,
             unique_key,
             instrument,
-            strategy_id,
-            stock_entry_price,
             first_buy_date,
             status,
             account_id
@@ -225,8 +210,6 @@ BEGIN
             COALESCE(NEW.symbol, 'UNKNOWN'),
             COALESCE(NEW.unique_key, NEW.symbol, 'UNKNOWN'),
             COALESCE(NEW.instrument, 'Stock'),
-            NEW.strategy_id,
-            COALESCE(NEW.stock_entry_price, CASE WHEN NEW.instrument = 'Stock' THEN NEW.price ELSE NULL END),
             NEW.date::DATE,
             'Open',
             NEW.account_id
@@ -234,7 +217,6 @@ BEGIN
         ON CONFLICT (trade_code) DO NOTHING;
 
         NEW.trade_code := v_new_code;
-        NEW.position_status := 'Open';
     END IF;
 
     RETURN NEW;

@@ -1104,72 +1104,18 @@ export async function resolveAndAssignTradesForTransactions(
   }
   const uniqueKeys = Array.from(keysToQuery);
 
-  // 3. Consultar en paralelo: trades abiertos, transacciones existentes en DB (para deduplicación y rescate de abiertos)
-  const [{ data: openTradesByKey }, { data: openTradesBySymbol }, { data: existingDbTxs }] = await Promise.all([
-    uniqueKeys.length > 0
-      ? supabase.from('trades').select('*').ilike('status', 'Open').in('unique_key', uniqueKeys)
-      : Promise.resolve({ data: [] }),
-    rawSymbols.length > 0
-      ? supabase.from('trades').select('*').ilike('status', 'Open').in('symbol', rawSymbols)
-      : Promise.resolve({ data: [] }),
-    rawSymbols.length > 0
-      ? supabase
-          .from('transactions')
-          .select('id, trade_code, date, symbol, unique_key, action, quantity, price, amount, account_id')
-          .in('symbol', rawSymbols)
-          .order('date', { ascending: false })
-      : Promise.resolve({ data: [] })
-  ]);
+  // 3. Consultar TODOS los trades actualmente abiertos en la tabla maestra 'trades'
+  const { data: openTradesInDb } = await supabase
+    .from('trades')
+    .select('*')
+    .ilike('status', 'Open');
 
-  // 4. DETECCIÓN Y DEDUPLICACIÓN DE TRANSACCIONES YA REGISTRADAS EN LA BD (Overlap de exportación ThinkorSwim)
-  const matchedDbTxIds = new Set<string>();
-  const dbTxsList: any[] = existingDbTxs || [];
-
-  const clonedRows = rows.map((r, idx) => {
-    let duplicateMatch: any = null;
-
-    for (const dbt of dbTxsList) {
-      if (matchedDbTxIds.has(dbt.id)) continue;
-
-      const sameSymbol = (dbt.symbol || '').trim().toUpperCase() === (r.symbol || '').trim().toUpperCase();
-      if (!sameSymbol) continue;
-
-      const sameDate = String(dbt.date || '').split('T')[0] === String(r.date || '').split('T')[0];
-      if (!sameDate) continue;
-
-      const actDb = (dbt.action || '').trim().toLowerCase();
-      const actRow = (r.action || '').trim().toLowerCase();
-      const sameAction = actDb === actRow || 
-        (actDb.includes('buy') && actRow.includes('buy')) ||
-        (actDb.includes('sell') && actRow.includes('sell'));
-      if (!sameAction) continue;
-
-      const sameQty = Math.abs((Number(dbt.quantity) || 0) - (Number(r.quantity) || 0)) < 0.0001;
-      const samePrice = Math.abs((Number(dbt.price) || 0) - (Number(r.price) || 0)) < 0.0001;
-      const sameAmount = Math.abs((Number(dbt.amount) || 0) - (Number(r.amount) || 0)) < 0.02;
-
-      if (sameQty && samePrice && sameAmount) {
-        duplicateMatch = dbt;
-        matchedDbTxIds.add(dbt.id);
-        break;
-      }
-    }
-
-    if (duplicateMatch) {
-      return {
-        ...r,
-        _origIdx: idx,
-        _isExistingDuplicate: true,
-        trade_code: r.trade_code || duplicateMatch.trade_code || null
-      };
-    }
-
-    return { ...r, _origIdx: idx, _isExistingDuplicate: false };
-  });
+  // 4. Clonar filas entrantes para procesarlas en orden cronológico
+  const clonedRows = rows.map((r, idx) => ({ ...r, _origIdx: idx }));
 
   // 5. Construir mapa de trades abiertos EXCLUSIVAMENTE desde la tabla maestra 'trades'
   const combinedOpenTradesMap = new Map<number, any>();
-  for (const tr of [...(openTradesByKey || []), ...(openTradesBySymbol || [])]) {
+  for (const tr of (openTradesInDb || [])) {
     const code = Number(tr.trade_code);
     if (!isNaN(code) && code > 0) {
       combinedOpenTradesMap.set(code, tr);
@@ -1257,13 +1203,6 @@ export async function resolveAndAssignTradesForTransactions(
   const newTradeCodes = new Set<number>();
 
   for (const row of clonedRows) {
-    if (row._isExistingDuplicate) {
-      if (row.trade_code && !isNaN(Number(row.trade_code))) {
-        assignedTradeCodes.add(Number(row.trade_code));
-      }
-      continue;
-    }
-
     const uKey = row.unique_key || row.symbol || 'UNKNOWN';
     const normUKey = normalizeUniqueKey(uKey);
     const act = (row.action || '').trim().toLowerCase();

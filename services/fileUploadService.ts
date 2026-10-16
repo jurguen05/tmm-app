@@ -249,11 +249,8 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
             accountId
           );
 
-          // 4. Insertar transacciones que NO sean duplicados ya existentes en la BD
-          const rowsToInsert = rowsWithCodes.filter((r: any) => !r._isExistingDuplicate);
-          if (rowsToInsert.length > 0) {
-            await insertTransactions(supabase, rowsToInsert);
-          }
+          // 4. Insertar transacciones del archivo vinculadas a sus trades
+          await insertTransactions(supabase, rowsWithCodes);
 
           // 5. Consolidar estado y métricas finales en la tabla maestra 'trades'
           const tradeCodes: number[] = Array.from(new Set<number>([
@@ -286,16 +283,13 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
             }
           }
 
-          const duplicatesCount = filasProcesadas.length - rowsToInsert.length;
-          const msg = duplicatesCount > 0
-            ? `Successfully processed ${rowsToInsert.length} new transactions (${duplicatesCount} duplicate records skipped).`
-            : `Successfully processed ${rowsToInsert.length} transactions.`;
+          const msg = `Successfully processed ${rowsWithCodes.length} transactions.`;
 
           resolve({
             success: true,
             module: 'transactions',
             fileName: file.name,
-            count: rowsToInsert.length,
+            count: rowsWithCodes.length,
             message: msg,
             tradeCodes: pendingTradeCodes
           });
