@@ -178,7 +178,7 @@ export const consolidarStrategiesStops = (
     }
   }
 
-  // Indexar trades de la tabla maestra si fueron provistos
+  // Indexar trades de la tabla maestra si fueron provistos (priorizando status === 'Open' por unique_key)
   const tradesByCode = new Map<number, Trade>();
   const tradesByKey = new Map<string, Trade>();
   if (trades && trades.length > 0) {
@@ -187,7 +187,13 @@ export const consolidarStrategiesStops = (
         tradesByCode.set(Number(tr.trade_code), tr);
       }
       if (tr.unique_key) {
-        tradesByKey.set(normalizeUniqueKey(tr.unique_key), tr);
+        const nk = normalizeUniqueKey(tr.unique_key);
+        const existing = tradesByKey.get(nk);
+        const existingIsOpen = existing && (existing.status || '').toLowerCase() === 'open';
+        const currentIsOpen = (tr.status || '').toLowerCase() === 'open';
+        if (!existing || (!existingIsOpen && currentIsOpen)) {
+          tradesByKey.set(nk, tr);
+        }
       }
     }
   }
@@ -238,9 +244,14 @@ export const consolidarStrategiesStops = (
   const txsByNormKey = new Map<string, Transaction[]>();
   const txsByTradeCode = new Map<string, Transaction[]>();
   for (const t of transactions || []) {
-    const nk = normalizeUniqueKey(t.unique_key);
-    const byKey = txsByNormKey.get(nk);
-    if (byKey) byKey.push(t); else txsByNormKey.set(nk, [t]);
+    const parentTrade = (t.trade_code !== null && t.trade_code !== undefined)
+      ? tradesByCode.get(Number(t.trade_code))
+      : undefined;
+    const nk = normalizeUniqueKey(parentTrade?.unique_key || t.unique_key);
+    if (nk) {
+      const byKey = txsByNormKey.get(nk);
+      if (byKey) byKey.push(t); else txsByNormKey.set(nk, [t]);
+    }
 
     if (t.trade_code !== null && t.trade_code !== undefined) {
       const tc = String(t.trade_code);
@@ -251,15 +262,18 @@ export const consolidarStrategiesStops = (
 
   const consolidado: ConsolidatedStrategyStop[] = positions.map((pos) => {
     const posNormKey = normalizeUniqueKey(pos.unique_key);
+    const masterByKey = tradesByKey.get(posNormKey);
     const txsDelCodigo = txsByNormKey.get(posNormKey) || [];
     
     // Filtrar transacciones abiertas ordenadas de más reciente a más antigua
-    const txsOpen = txsDelCodigo.filter(t => t.position_status?.toLowerCase() === 'open');
+    const txsOpen = txsDelCodigo.filter(t => (t.trade?.status || t.position_status || 'Open').toLowerCase() === 'open');
     const txsOpenOrdenadas = [...txsOpen].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
-    const trade_code = txsOpenOrdenadas.length > 0 && txsOpenOrdenadas[0].trade_code !== null && txsOpenOrdenadas[0].trade_code !== undefined
-      ? String(txsOpenOrdenadas[0].trade_code) 
-      : '-';
+    const trade_code = (masterByKey && (masterByKey.status || '').toLowerCase() === 'open' && masterByKey.trade_code)
+      ? String(masterByKey.trade_code)
+      : (txsOpenOrdenadas.length > 0 && txsOpenOrdenadas[0].trade_code !== null && txsOpenOrdenadas[0].trade_code !== undefined
+          ? String(txsOpenOrdenadas[0].trade_code) 
+          : (masterByKey?.trade_code ? String(masterByKey.trade_code) : '-'));
       
     const strategy = txsOpenOrdenadas.length > 0
       ? (txsOpenOrdenadas[0].strategies?.name || txsOpenOrdenadas[0].strategy || 'S/D')
@@ -289,8 +303,8 @@ export const consolidarStrategiesStops = (
 
     // Verificar si existe registro maestro en 'trades'
     const tradeFromMaster = (trade_code && trade_code !== '-' && !isNaN(Number(trade_code)))
-      ? tradesByCode.get(Number(trade_code))
-      : tradesByKey.get(posNormKey);
+      ? (tradesByCode.get(Number(trade_code)) || masterByKey)
+      : masterByKey;
 
     const finalStrategyId = tradeFromMaster?.strategy_id ?? strategy_id;
     const strategyRecord = finalStrategyId ? strategiesById.get(finalStrategyId) : null;

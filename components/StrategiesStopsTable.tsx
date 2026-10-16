@@ -62,7 +62,6 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
         exit_signal: exitSignal,
         closed_date: new Date().toISOString().substring(0, 10)
       });
-      await updateTransactionsByTradeCode(supabase, tradeCode, 'position_status', 'Closed').catch(() => {})
       setMissingList(prev => prev.filter(t => t.trade_code !== tradeCode))
       router.refresh()
     } catch (err: any) {

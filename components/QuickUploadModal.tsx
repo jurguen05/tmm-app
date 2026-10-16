@@ -4,13 +4,16 @@ import { useState, useRef, DragEvent, ChangeEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { ModuleType } from '../types'
-import { checkFileUploadExists } from '../services/queries'
+import { 
+  checkFileUploadExists 
+} from '../services/queries'
 import { 
   detectarModuloArchivo, 
   processPositionsUpload, 
   processTransactionsUpload, 
   processMkTosUpload 
 } from '../services/fileUploadService'
+import ReviewNewTradesModal from './ReviewNewTradesModal'
 
 interface QuickUploadModalProps {
   isOpen: boolean
@@ -27,9 +30,11 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [step, setStep] = useState<'upload' | 'enrich'>('upload')
   const [isDragging, setIsDragging] = useState(false)
   const [globalLoading, setGlobalLoading] = useState(false)
   const [advertencias, setAdvertencias] = useState<string[]>([])
+  const [enrichTradeCodes, setEnrichTradeCodes] = useState<number[]>([])
 
   const [slots, setSlots] = useState<Record<ModuleType, SlotState>>({
     positions: { file: null, status: 'idle', message: '' },
@@ -40,6 +45,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
   if (!isOpen) return null
 
   const resetAll = () => {
+    setStep('upload')
     setSlots({
       positions: { file: null, status: 'idle', message: '' },
       transactions: { file: null, status: 'idle', message: '' },
@@ -47,6 +53,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
     })
     setAdvertencias([])
     setGlobalLoading(false)
+    setEnrichTradeCodes([])
   }
 
   const handleClose = () => {
@@ -142,6 +149,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
     setGlobalLoading(true)
     let algunExito = false
     let huboError = false
+    let insertedTradeCodes: number[] = []
 
     for (const modulo of modulosParaProcesar) {
       const file = slots[modulo].file!
@@ -153,9 +161,16 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
 
       try {
         let result
-        if (modulo === 'positions') result = await processPositionsUpload(file, supabase)
-        else if (modulo === 'transactions') result = await processTransactionsUpload(file, supabase)
-        else result = await processMkTosUpload(file, supabase)
+        if (modulo === 'positions') {
+          result = await processPositionsUpload(file, supabase)
+        } else if (modulo === 'transactions') {
+          result = await processTransactionsUpload(file, supabase)
+          if (result.success && result.tradeCodes && result.tradeCodes.length > 0) {
+            insertedTradeCodes = result.tradeCodes
+          }
+        } else {
+          result = await processMkTosUpload(file, supabase)
+        }
 
         if (result.success) {
           algunExito = true
@@ -185,7 +200,14 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
       router.refresh()
     }
 
-    // Si todo se procesó con éxito y sin errores, cerrar automáticamente en 1 segundo
+    // Si se subieron transacciones con éxito y sin error, verificar si hay trades para enriquecer
+    if (algunExito && !huboError && insertedTradeCodes.length > 0) {
+      setEnrichTradeCodes(insertedTradeCodes)
+      setStep('enrich')
+      return
+    }
+
+    // Si todo se procesó con éxito y sin errores ni necesidad de enriquecimiento, cerrar automáticamente en 1 segundo
     if (algunExito && !huboError) {
       setTimeout(() => {
         resetAll()
@@ -216,7 +238,7 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
         }
       case 'transactions':
         return {
-          title: 'Transactions CSV',
+          title: 'Transactions Activity',
           shortName: 'Transactions',
           badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
           icon: '💳'
@@ -229,6 +251,23 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
           icon: '📈'
         }
     }
+  }
+
+  if (step === 'enrich') {
+    return (
+      <ReviewNewTradesModal
+        isOpen={true}
+        tradeCodes={enrichTradeCodes}
+        onClose={() => {
+          resetAll()
+          onClose()
+        }}
+        onSaved={() => {
+          resetAll()
+          onClose()
+        }}
+      />
+    )
   }
 
   return (

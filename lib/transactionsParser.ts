@@ -170,7 +170,7 @@ export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Op
     const act = (t.action || '').trim().toLowerCase();
     const qty = Math.abs(t.quantity || 0);
 
-    const isBuy = act.includes('buy') || act.includes('bot') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
+    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
     const isSell = act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
 
     const delta = isBuy ? qty : (isSell ? -qty : 0);

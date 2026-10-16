@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { updateTransactionField, deleteTransactions, updateTradeField, closeTradeWithExitMetrics, updateTransactionsByTradeCode, getFilteredTransactions } from '../services/queries'
+import { updateTransactionField, deleteTransactions, updateTradeField, updateTransactionsByTradeCode, getFilteredTransactions, syncTradesForCodes } from '../services/queries'
 import { Transaction, Strategy } from '../types'
 import TransactionsTable from './TransactionsTable'
 import PaginationControls from './PaginationControls'
@@ -60,6 +60,25 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
     return () => clearTimeout(timer)
   }, [filtros, hayFiltrosActivos, initialTransactions])
 
+  // Re-consultar automáticamente cuando se sube o elimina un archivo en Historial
+  useEffect(() => {
+    const handleTransactionsChanged = async () => {
+      if (hayFiltrosActivos) {
+        setIsSearching(true)
+        try {
+          const res = await getFilteredTransactions(supabase, filtros)
+          setTransacciones(res)
+        } finally {
+          setIsSearching(false)
+        }
+      } else {
+        router.refresh()
+      }
+    }
+    window.addEventListener('transactions-changed', handleTransactionsChanged)
+    return () => window.removeEventListener('transactions-changed', handleTransactionsChanged)
+  }, [hayFiltrosActivos, filtros, router])
+
   const actualizarTransaccion = async (id: string, campo: string, valor: any) => {
     const tx = transacciones.find(t => t.id === id)
     if (!tx) return;
@@ -67,7 +86,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
     const codeNum = tx.trade_code ? Number(tx.trade_code) : null;
     const est = campo === 'strategy_id' ? estrategias.find(e => e.id === valor) : null;
 
-    // Optimistic UI update: Si tiene trade_code, actualizar todas las filas de ese trade en pantalla
+    // Optimistic UI update: Si tiene trade_code, actualizar estrategia y stock entry price en todas las filas de ese trade
     setTransacciones(prev => prev.map(t => {
       const matchTrade = codeNum && t.trade_code && Number(t.trade_code) === codeNum;
       if (matchTrade) {
@@ -79,9 +98,6 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
             strategy: est ? est.name : null
           };
         }
-        if (campo === 'position_status') {
-          return { ...t, position_status: valor };
-        }
         if (campo === 'stock_entry_price') {
           return { ...t, stock_entry_price: valor };
         }
@@ -91,21 +107,16 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
 
     try {
       if (codeNum && !isNaN(codeNum) && codeNum > 0) {
-        // 1. Actualizar la tabla maestra trades
+        // Actualizar la tabla maestra trades para estrategia y stock_entry_price
         if (campo === 'strategy_id') {
           await updateTradeField(supabase, codeNum, 'strategy_id', valor);
+          await updateTransactionsByTradeCode(supabase, codeNum, 'strategy_id', valor).catch(() => {});
         } else if (campo === 'stock_entry_price') {
           await updateTradeField(supabase, codeNum, 'stock_entry_price', valor);
-        } else if (campo === 'position_status') {
-          if (valor === 'Closed') {
-            await closeTradeWithExitMetrics(supabase, codeNum);
-          } else {
-            await updateTradeField(supabase, codeNum, 'status', valor);
-          }
+          await updateTransactionsByTradeCode(supabase, codeNum, 'stock_entry_price', valor).catch(() => {});
+        } else {
+          await updateTransactionField(supabase, id, campo, valor);
         }
-
-        // 2. Actualizar las transacciones hijas para consistencia
-        await updateTransactionsByTradeCode(supabase, codeNum, campo, valor).catch(() => {});
       } else {
         await updateTransactionField(supabase, id, campo, valor);
       }
@@ -118,8 +129,19 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   const borrarSeleccionadas = async () => {
     if (!confirm(`¿Estás seguro de que querés borrar ${selectedIds.length} transacción/es?`)) return
     try {
+      const affectedCodes = Array.from(new Set(
+        transacciones
+          .filter(t => selectedIds.includes(t.id))
+          .map(t => Number(t.trade_code))
+          .filter(c => !isNaN(c) && c > 0)
+      ));
+
       await deleteTransactions(supabase, selectedIds)
       
+      if (affectedCodes.length > 0) {
+        await syncTradesForCodes(supabase, affectedCodes).catch(() => {});
+      }
+
       setTransacciones(prev => prev.filter(t => !selectedIds.includes(t.id)))
       setSelectedIds([])
       router.refresh()

@@ -41,6 +41,7 @@ export interface Trade {
   trade_code: number;
   symbol: string;
   unique_key: string;
+  instrument?: 'Stock' | 'Option';
   strategy_id: number | null;
   strategies?: { name: string } | null;
   stock_entry_price: number | null;
@@ -67,6 +68,16 @@ export interface Strategy {
   name: string;
   is_active: boolean;
   created_at?: string;
+}
+
+export interface TradeEnrichmentItem {
+  trade_code: number;
+  symbol: string;
+  instrument: 'Stock' | 'Option';
+  strategy_id: number | null;
+  stock_entry_price: number | null;
+  is_stock: boolean;
+  suggested_price?: number | null;
 }
 
 export interface Profile {

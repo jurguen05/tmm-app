@@ -1,6 +1,6 @@
 // services/queries.ts
 
-import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose } from '../types';
+import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia } from '../lib/formatters';
@@ -47,7 +47,7 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
 
   const { data: tradesData, error: tradesError } = await supabase
     .from('trades')
-    .select('trade_code, strategy_id, status, stock_entry_price, strategies(name)')
+    .select('*, strategies(name)')
     .in('trade_code', uniqueCodes);
 
   if (tradesError) {
@@ -62,21 +62,27 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
     }
   }
 
-  return txs.map((t) => {
+  return txs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     if (codeNum && tradesMap.has(codeNum)) {
       const tr = tradesMap.get(codeNum)!;
       return {
         ...t,
+        symbol: tr.symbol || t.symbol,
+        unique_key: tr.unique_key || t.unique_key,
+        instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
         strategy_id: tr.strategy_id ?? t.strategy_id,
         strategies: tr.strategies || (tr.strategy_id ? t.strategies : t.strategies),
         strategy: tr.strategies?.name || t.strategy,
-        position_status: tr.status ?? t.position_status,
+        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
         stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
         trade: tr
       };
     }
-    return t;
+    return {
+      ...t,
+      position_status: 'Open' as 'Open' | 'Closed'
+    };
   });
 }
 
@@ -101,7 +107,17 @@ export async function getFilteredTransactions(
   }
 
   if (filters.symbol && filters.symbol.trim()) {
-    query = query.ilike('symbol', `%${filters.symbol.trim()}%`);
+    const symVal = filters.symbol.trim();
+    const { data: symTrades } = await supabase
+      .from('trades')
+      .select('trade_code')
+      .ilike('symbol', `%${symVal}%`);
+    const symCodes = ((symTrades as any[]) || []).map((t: any) => t.trade_code).filter((c: any): c is number => c !== null && c !== undefined);
+    if (symCodes.length > 0) {
+      query = query.or(`symbol.ilike.%${symVal}%,trade_code.in.(${symCodes.join(',')})`);
+    } else {
+      query = query.ilike('symbol', `%${symVal}%`);
+    }
   }
 
   if (filters.status && filters.status.trim() && filters.status.toLowerCase() !== 'all') {
@@ -155,7 +171,7 @@ export async function getFilteredTransactions(
   if (uniqueCodes.length > 0) {
     const { data: tradesData, error: tradesError } = await supabase
       .from('trades')
-      .select('trade_code, strategy_id, status, stock_entry_price, strategies(name)')
+      .select('*, strategies(name)')
       .in('trade_code', uniqueCodes);
 
     if (!tradesError && tradesData) {
@@ -167,21 +183,59 @@ export async function getFilteredTransactions(
     }
   }
 
-  let enriched = txs.map((t) => {
+  // Agrupar transacciones por trade_code
+  const txsByCode = new Map<number, Transaction[]>();
+  for (const t of txs) {
+    const c = t.trade_code ? Number(t.trade_code) : null;
+    if (c && !isNaN(c) && c > 0) {
+      if (!txsByCode.has(c)) txsByCode.set(c, []);
+      txsByCode.get(c)!.push(t);
+    }
+  }
+
+  // Si se filtró por trade_code (ej: 105), tenemos el conjunto completo de sus transacciones.
+  // Verificamos si el estado en la tabla trades coincide con el balance neto real calculado.
+  const desyncedCodesToSync: number[] = [];
+  if (filters.trade_code && filters.trade_code.trim()) {
+    for (const [codeNum, codeTxs] of txsByCode.entries()) {
+      const tr = tradesMap.get(codeNum);
+      if (tr) {
+        const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
+        if (tr.status !== realStatus) {
+          tr.status = realStatus;
+          desyncedCodesToSync.push(codeNum);
+        }
+      }
+    }
+  }
+
+  if (desyncedCodesToSync.length > 0) {
+    syncTradesForCodes(supabase, desyncedCodesToSync).catch(err => {
+      console.warn('[getFilteredTransactions] Auto-sync error:', err.message);
+    });
+  }
+
+  let enriched: Transaction[] = txs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     if (codeNum && tradesMap.has(codeNum)) {
       const tr = tradesMap.get(codeNum)!;
       return {
         ...t,
+        symbol: tr.symbol || t.symbol,
+        unique_key: tr.unique_key || t.unique_key,
+        instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
         strategy_id: tr.strategy_id ?? t.strategy_id,
         strategies: tr.strategies || t.strategies,
         strategy: tr.strategies?.name || t.strategy,
-        position_status: tr.status ?? t.position_status,
+        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
         stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
         trade: tr
       };
     }
-    return t;
+    return {
+      ...t,
+      position_status: 'Open' as 'Open' | 'Closed'
+    };
   });
 
   if (filters.strategy && filters.strategy.trim() && filters.strategy.toLowerCase() !== 'all') {
@@ -191,17 +245,65 @@ export async function getFilteredTransactions(
   return enriched;
 }
 
-// 3. Obtener transacciones por lista de claves únicas (usado para consolidación de estrategias)
+// 3. Obtener transacciones por lista de claves únicas (resolviendo desde la tabla maestra trades por unique_key)
 export async function getTransactionsByUniqueKeys(supabase: SupabaseClient, uniqueKeys: string[]): Promise<Transaction[]> {
   if (!uniqueKeys || uniqueKeys.length === 0) return [];
-  
-  const { data, error } = await supabase
-    .from('transactions')
+
+  // 1. Buscar en la tabla maestra 'trades' los trade_codes que corresponden a esos unique_keys
+  const { data: tradesData } = await supabase
+    .from('trades')
     .select('*, strategies(name)')
     .in('unique_key', uniqueKeys);
-    
-  if (error) throw new Error(error.message);
-  return data || [];
+
+  const tradesMap = new Map<number, any>();
+  const tradeCodes: number[] = [];
+  for (const tr of tradesData || []) {
+    const c = Number(tr.trade_code);
+    if (!isNaN(c) && c > 0) {
+      tradesMap.set(c, tr);
+      tradeCodes.push(c);
+    }
+  }
+
+  // 2. Consultar transacciones por trade_code (y por unique_key como respaldo histórico)
+  const queries: Promise<any>[] = [
+    supabase
+      .from('transactions')
+      .select('*, strategies(name)')
+      .in('unique_key', uniqueKeys)
+  ];
+  if (tradeCodes.length > 0) {
+    queries.push(
+      supabase
+        .from('transactions')
+        .select('*, strategies(name)')
+        .in('trade_code', tradeCodes)
+    );
+  }
+
+  const results = await Promise.all(queries);
+  const txMap = new Map<string, Transaction>();
+  for (const res of results) {
+    if (res.error) throw new Error(res.error.message);
+    for (const t of res.data || []) {
+      const codeNum = t.trade_code ? Number(t.trade_code) : null;
+      const tr = codeNum && tradesMap.has(codeNum) ? tradesMap.get(codeNum)! : null;
+      txMap.set(t.id, tr ? {
+        ...t,
+        symbol: tr.symbol || t.symbol,
+        unique_key: tr.unique_key || t.unique_key,
+        instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
+        strategy_id: tr.strategy_id ?? t.strategy_id,
+        strategies: tr.strategies || t.strategies,
+        strategy: tr.strategies?.name || t.strategy,
+        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
+        stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
+        trade: tr
+      } : t);
+    }
+  }
+
+  return Array.from(txMap.values());
 }
 
 // 4. Obtener las estrategias activas
@@ -715,6 +817,12 @@ export async function updateTradeField(
     if (!updates.closed_date) {
       updates.closed_date = new Date().toISOString().substring(0, 10);
     }
+  } else if (field === 'status' && value === 'Open') {
+    updates.closed_date = null;
+    updates.exit_price = null;
+    updates.exit_stop = null;
+    updates.exit_signal = null;
+    updates.realized_pnl = null;
   }
 
   const { error } = await supabase
@@ -741,6 +849,70 @@ export async function updateTradeField(
 }
 
 // 26c. Cerrar un trade registrando sus métricas de salida (exit_stop, exit_price, exit_signal, closed_date)
+// 26c1. Calcula las métricas de salida para cada una de las 9 estrategias (STRATEGIES_STOPS.md)
+export function calculateStrategyExitMetrics(
+  strategyName: string,
+  quote: any | null,
+  stockEntryPrice: number | null,
+  maxStockPrice: number | null,
+  ratchetStop: number | null,
+  weekendTraderFlag: boolean,
+  fillSellPrice?: number | null
+): { exit_price: number | null; exit_stop: number | null; exit_signal: number | null } {
+  const sName = (strategyName || '').trim().toLowerCase();
+  const lastPrice = (quote && quote.last_price > 0) ? quote.last_price : (fillSellPrice || null);
+  let exit_price: number | null = lastPrice;
+  let exit_stop: number | null = null;
+  let exit_signal: number | null = null;
+
+  if (sName.includes('tech')) {
+    // 1. Tech Trader: max(Entry * 0.90, quote.ema)
+    const entryFloor = stockEntryPrice ? Number((stockEntryPrice * 0.90).toFixed(4)) : 0;
+    const emaVal = quote?.ema || 0;
+    exit_stop = Math.max(entryFloor, emaVal) || lastPrice;
+  } else if (sName.includes('flipper')) {
+    // 2. 20% Flipper: Max Stock Price * 0.80
+    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
+    exit_stop = peak > 0 ? Number((peak * 0.80).toFixed(4)) : lastPrice;
+  } else if (sName.includes('weekend')) {
+    // 3. Weekend Trader: High * 0.90 (si flag) o High * 0.60
+    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
+    const factor = weekendTraderFlag ? 0.90 : 0.60;
+    exit_stop = peak > 0 ? Number((peak * factor).toFixed(4)) : lastPrice;
+  } else if (sName.includes('trend') || sName.includes('pilot')) {
+    // 4. Trend Pilot: Stop = Last Price, Signal = trendpilot_stop (si >= 3)
+    exit_stop = lastPrice;
+    if (quote?.trendpilot_stop !== null && quote?.trendpilot_stop !== undefined && quote.trendpilot_stop >= 3) {
+      exit_signal = quote.trendpilot_stop;
+    }
+  } else if (sName.includes('mac')) {
+    // 5. MAC: Stop = Last Price, Signal = mac_stop (si >= 3)
+    exit_stop = lastPrice;
+    if (quote?.mac_stop !== null && quote?.mac_stop !== undefined && quote.mac_stop >= 3) {
+      exit_signal = quote.mac_stop;
+    }
+  } else if (sName.includes('newyearly') || sName.includes('yearly')) {
+    // 6. New Yearly Highs: max(ratchet_stop, low_52)
+    const rStop = ratchetStop || 0;
+    const low52 = quote?.low_52 || 0;
+    exit_stop = Math.max(rStop, low52) || lastPrice;
+  } else if (sName.includes('100')) {
+    // 7. 100-day-High: max(ratchet_stop, low_100_day)
+    const rStop = ratchetStop || 0;
+    const low100 = quote?.low_100_day || 0;
+    exit_stop = Math.max(rStop, low100) || lastPrice;
+  } else if (sName.includes('bbo') || sName.includes('bollinger')) {
+    // 8. BBO: Stop = quote.bollinger_bands
+    exit_stop = quote?.bollinger_bands || lastPrice;
+  } else {
+    // 9. Hedge / Default: Stop = Last Price
+    exit_stop = lastPrice;
+  }
+
+  return { exit_price, exit_stop, exit_signal };
+}
+
+// 26c. Cerrar un trade registrando sus métricas de salida (exit_stop, exit_price, exit_signal, closed_date)
 export async function closeTradeWithExitMetrics(
   supabase: SupabaseClient,
   tradeCode: number,
@@ -756,7 +928,8 @@ export async function closeTradeWithExitMetrics(
     status: 'Closed',
     closed_date: explicitMetrics?.closed_date || today,
     max_stock_price: null,
-    max_stock_price_date: null
+    max_stock_price_date: null,
+    weekend_trader_flag: false
   };
 
   if (explicitMetrics?.exit_stop !== undefined && explicitMetrics.exit_stop !== null && typeof explicitMetrics.exit_stop === 'number') {
@@ -769,16 +942,19 @@ export async function closeTradeWithExitMetrics(
     payload.exit_signal = explicitMetrics.exit_signal;
   }
 
-  // Si faltó alguna métrica de salida, buscarla desde el trade y su cotización en MK-TOS
-  if (payload.exit_price === undefined || payload.exit_stop === undefined) {
-    try {
-      const { data: tr } = await supabase
-        .from('trades')
-        .select('symbol, strategy_id, stock_entry_price, ratchet_stop, strategies(name)')
-        .eq('trade_code', tradeCode)
-        .maybeSingle();
+  // Si faltó alguna métrica de salida o realized_pnl, buscarla desde el trade y su cotización en MK-TOS
+  try {
+    const { data: tr } = await supabase
+      .from('trades')
+      .select('*, strategies(name)')
+      .eq('trade_code', tradeCode)
+      .maybeSingle();
 
-      if (tr && tr.symbol) {
+    if (tr) {
+      if (tr.cash_flow !== null && tr.cash_flow !== undefined) {
+        payload.realized_pnl = Number(tr.cash_flow);
+      }
+      if ((payload.exit_price === undefined || payload.exit_stop === undefined) && tr.symbol) {
         const { data: quote } = await supabase
           .from('mk_tos_quotes')
           .select('last_price, mac_stop, trendpilot_stop, low_52, low_100_day, ema, bollinger_bands')
@@ -787,37 +963,24 @@ export async function closeTradeWithExitMetrics(
           .limit(1)
           .maybeSingle();
 
-        if (quote) {
-          const sName = ((tr.strategies as any)?.name || '').toLowerCase();
-          const lastPrice = quote.last_price || null;
-          if (payload.exit_price === undefined && lastPrice) {
-            payload.exit_price = lastPrice;
-          }
+        const sName = ((tr.strategies as any)?.name || '');
+        const calculated = calculateStrategyExitMetrics(
+          sName,
+          quote,
+          tr.stock_entry_price,
+          tr.max_stock_price,
+          tr.ratchet_stop,
+          tr.weekend_trader_flag,
+          payload.exit_price
+        );
 
-          if (sName.includes('mac')) {
-            // Regla MAC: Signal es mac_stop, Stop es Last
-            payload.exit_signal = quote.mac_stop ?? null;
-            if (payload.exit_stop === undefined) payload.exit_stop = lastPrice;
-          } else if (sName.includes('trend') || sName.includes('pilot')) {
-            // Regla Trend Pilot: Signal es trendpilot_stop, Stop es Last
-            payload.exit_signal = quote.trendpilot_stop ?? null;
-            if (payload.exit_stop === undefined) payload.exit_stop = lastPrice;
-          } else if (sName.includes('newyearly') || sName.includes('yearly')) {
-            if (payload.exit_stop === undefined) {
-              payload.exit_stop = tr.ratchet_stop || quote.low_52 || null;
-            }
-          } else if (sName.includes('100')) {
-            if (payload.exit_stop === undefined) {
-              payload.exit_stop = tr.ratchet_stop || quote.low_100_day || null;
-            }
-          } else if (payload.exit_stop === undefined && lastPrice) {
-            payload.exit_stop = lastPrice;
-          }
-        }
+        if (payload.exit_price === undefined) payload.exit_price = calculated.exit_price;
+        if (payload.exit_stop === undefined) payload.exit_stop = calculated.exit_stop;
+        if (payload.exit_signal === undefined) payload.exit_signal = calculated.exit_signal;
       }
-    } catch (err: unknown) {
-      console.warn('[closeTradeWithExitMetrics] Warning al consultar cotizaciones:', err instanceof Error ? err.message : String(err));
     }
+  } catch (err: unknown) {
+    console.warn('[closeTradeWithExitMetrics] Warning al consultar cotizaciones:', err instanceof Error ? err.message : String(err));
   }
 
   try {
@@ -827,7 +990,6 @@ export async function closeTradeWithExitMetrics(
       .eq('trade_code', tradeCode);
 
     if (error) {
-      // Fallback seguro si las columnas nuevas no están presentes en DB
       await supabase
         .from('trades')
         .update({ status: 'Closed', max_stock_price: null, max_stock_price_date: null })
@@ -864,7 +1026,255 @@ export async function upsertTrades(
     .from('trades')
     .upsert(rows, { onConflict: 'trade_code' });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.message && error.message.includes('instrument')) {
+      const fallbackRows = rows.map(({ instrument, ...rest }) => rest);
+      const { error: fbErr } = await supabase
+        .from('trades')
+        .upsert(fallbackRows, { onConflict: 'trade_code' });
+      if (fbErr) throw new Error(fbErr.message);
+      return;
+    }
+    throw new Error(error.message);
+  }
+}
+
+// 27b. Resolver y generar trade_code en la tabla maestra 'trades' a partir de unique_key antes de insertar en 'transactions'
+export async function resolveAndAssignTradesForTransactions(
+  supabase: SupabaseClient,
+  rows: any[],
+  defaultAccountId?: string
+): Promise<{ rowsWithCodes: any[]; tradeCodes: number[] }> {
+  if (!rows || rows.length === 0) {
+    return { rowsWithCodes: [], tradeCodes: [] };
+  }
+
+  // 1. Obtener el máximo trade_code actual entre trades y transactions
+  const [{ data: maxTradeRow }, { data: maxTxRow }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('trade_code')
+      .order('trade_code', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('transactions')
+      .select('trade_code')
+      .not('trade_code', 'is', null)
+      .order('trade_code', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ]);
+
+  const maxInTrades = maxTradeRow?.trade_code ? Number(maxTradeRow.trade_code) : 1;
+  const maxInTxs = maxTxRow?.trade_code ? Number(maxTxRow.trade_code) : 1;
+  let nextTradeCode = Math.max(isNaN(maxInTrades) ? 1 : maxInTrades, isNaN(maxInTxs) ? 1 : maxInTxs, 1) + 1;
+
+  // 2. Obtener trades actualmente 'Open' en la tabla maestra 'trades' para los unique_key del lote
+  const uniqueKeys = Array.from(new Set(rows.map(r => r.unique_key || r.symbol).filter(Boolean)));
+  const { data: openTradesData } = uniqueKeys.length > 0
+    ? await supabase
+        .from('trades')
+        .select('*')
+        .eq('status', 'Open')
+        .in('unique_key', uniqueKeys)
+    : { data: [] };
+
+  const openTradesList: any[] = openTradesData || [];
+  const openTradeCodes = openTradesList
+    .map(t => Number(t.trade_code))
+    .filter(c => !isNaN(c) && c > 0);
+
+  // 3. Obtener transacciones previas de esos trades abiertos para llevar el balance neto acumulado exacto
+  const { data: existingOpenTxs } = openTradeCodes.length > 0
+    ? await supabase
+        .from('transactions')
+        .select('trade_code, action, quantity, amount, instrument')
+        .in('trade_code', openTradeCodes)
+    : { data: [] };
+
+  interface ActiveTradeState {
+    trade: Partial<Trade>;
+    netStock: number;
+    netOption: number;
+    hasStock: boolean;
+    hasOption: boolean;
+  }
+
+  const stateByCode = new Map<number, ActiveTradeState>();
+  const activeOpenByKey = new Map<string, ActiveTradeState>();
+
+  for (const tr of openTradesList) {
+    const code = Number(tr.trade_code);
+    if (isNaN(code) || code <= 0) continue;
+    const state: ActiveTradeState = {
+      trade: { ...tr },
+      netStock: 0,
+      netOption: 0,
+      hasStock: false,
+      hasOption: false
+    };
+    stateByCode.set(code, state);
+    if (tr.unique_key) {
+      activeOpenByKey.set(tr.unique_key, state);
+    }
+  }
+
+  for (const t of existingOpenTxs || []) {
+    const code = Number(t.trade_code);
+    const state = stateByCode.get(code);
+    if (!state) continue;
+    const act = (t.action || '').trim().toLowerCase();
+    const qty = Math.abs(t.quantity || 0);
+    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
+    const isSell = act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const delta = isBuy ? qty : (isSell ? -qty : 0);
+    if (t.instrument === 'Option') {
+      state.hasOption = true;
+      state.netOption += delta;
+    } else {
+      state.hasStock = true;
+      state.netStock += delta;
+    }
+  }
+
+  // 4. Ordenar las filas entrantes cronológicamente (compras antes que ventas en el mismo día)
+  const clonedRows = rows.map((r, idx) => ({ ...r, _origIdx: idx }));
+  clonedRows.sort((a, b) => {
+    const dateCmp = String(a.date || '').localeCompare(String(b.date || ''));
+    if (dateCmp !== 0) return dateCmp;
+    const actA = String(a.action || '').toLowerCase();
+    const actB = String(b.action || '').toLowerCase();
+    const isBuyA = actA.includes('buy') || actA.includes('bot') || actA.includes('bought') || (typeof a.amount === 'number' && a.amount < 0);
+    const isBuyB = actB.includes('buy') || actB.includes('bot') || actB.includes('bought') || (typeof b.amount === 'number' && b.amount < 0);
+    if (isBuyA !== isBuyB) return isBuyA ? -1 : 1;
+    return a._origIdx - b._origIdx;
+  });
+
+  const tradesToUpsertMap = new Map<number, Partial<Trade>>();
+  const assignedTradeCodes = new Set<number>();
+
+  for (const row of clonedRows) {
+    const uKey = row.unique_key || row.symbol || 'UNKNOWN';
+    const act = (row.action || '').trim().toLowerCase();
+    const qty = Math.abs(row.quantity || 0);
+    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (row.amount !== null && row.amount !== undefined && row.amount < 0);
+    const isSell = act.includes('sell') || act.includes('sold') || (row.amount !== null && row.amount !== undefined && row.amount > 0);
+    const delta = isBuy ? qty : (isSell ? -qty : 0);
+
+    let code = row.trade_code && !isNaN(Number(row.trade_code)) && Number(row.trade_code) > 0
+      ? Number(row.trade_code)
+      : null;
+
+    let activeState: ActiveTradeState | undefined;
+
+    if (code !== null) {
+      if ( code >= nextTradeCode ) {
+        nextTradeCode = code + 1;
+      }
+      activeState = stateByCode.get(code);
+      if (!activeState) {
+        const newTrade: Partial<Trade> = {
+          trade_code: code,
+          symbol: row.symbol || uKey,
+          unique_key: uKey,
+          instrument: (row.instrument || 'Stock') as 'Stock' | 'Option',
+          strategy_id: row.strategy_id ?? null,
+          stock_entry_price: row.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
+          first_buy_date: row.date,
+          status: 'Open',
+          weekend_trader_flag: false,
+          account_id: row.account_id || defaultAccountId || null
+        };
+        activeState = {
+          trade: newTrade,
+          netStock: 0,
+          netOption: 0,
+          hasStock: false,
+          hasOption: false
+        };
+        stateByCode.set(code, activeState);
+        activeOpenByKey.set(uKey, activeState);
+        tradesToUpsertMap.set(code, newTrade);
+      }
+    } else {
+      // Buscar trade maestro 'Open' para este unique_key
+      activeState = activeOpenByKey.get(uKey);
+
+      if (activeState && activeState.trade.trade_code) {
+        code = Number(activeState.trade.trade_code);
+        row.trade_code = code;
+        row.strategy_id = row.strategy_id ?? activeState.trade.strategy_id ?? null;
+        row.stock_entry_price = row.stock_entry_price ?? activeState.trade.stock_entry_price ?? null;
+      } else {
+        // No existe trade 'Open' para este unique_key -> generar nuevo trade_code en 'trades'
+        code = nextTradeCode++;
+        row.trade_code = code;
+
+        const newTrade: Partial<Trade> = {
+          trade_code: code,
+          symbol: row.symbol || uKey,
+          unique_key: uKey,
+          instrument: (row.instrument || 'Stock') as 'Stock' | 'Option',
+          strategy_id: row.strategy_id ?? null,
+          stock_entry_price: row.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
+          first_buy_date: row.date,
+          status: 'Open',
+          weekend_trader_flag: false,
+          account_id: row.account_id || defaultAccountId || null
+        };
+
+        activeState = {
+          trade: newTrade,
+          netStock: 0,
+          netOption: 0,
+          hasStock: false,
+          hasOption: false
+        };
+        stateByCode.set(code, activeState);
+        activeOpenByKey.set(uKey, activeState);
+        tradesToUpsertMap.set(code, newTrade);
+      }
+    }
+
+    assignedTradeCodes.add(code);
+
+    // Actualizar balance neto del trade tras esta ejecución
+    if (row.instrument === 'Option') {
+      activeState.hasOption = true;
+      activeState.netOption += delta;
+    } else {
+      activeState.hasStock = true;
+      activeState.netStock += delta;
+    }
+
+    const stockClosed = !activeState.hasStock || Math.abs(activeState.netStock) <= 0.0001;
+    const optionClosed = !activeState.hasOption || Math.abs(activeState.netOption) <= 0.0001;
+
+    if (stockClosed && optionClosed && (activeState.hasStock || activeState.hasOption)) {
+      activeState.trade.status = 'Closed';
+      row.position_status = 'Closed';
+      activeOpenByKey.delete(uKey);
+      tradesToUpsertMap.set(code, activeState.trade);
+    } else {
+      activeState.trade.status = 'Open';
+      row.position_status = 'Open';
+    }
+  }
+
+  // 5. Persistir primero los registros maestros en 'trades' antes de insertar en 'transactions'
+  if (tradesToUpsertMap.size > 0) {
+    await upsertTrades(supabase, Array.from(tradesToUpsertMap.values()));
+  }
+
+  // Restaurar el orden original de las filas con sus trade_code ya asignados
+  clonedRows.sort((a, b) => a._origIdx - b._origIdx);
+  const rowsWithCodes = clonedRows.map(({ _origIdx, ...rest }) => rest);
+
+  return {
+    rowsWithCodes,
+    tradeCodes: Array.from(assignedTradeCodes)
+  };
 }
 
 // 28. Sincronizar tabla trades a partir de transacciones subidas
@@ -880,7 +1290,7 @@ export async function syncTradesForCodes(
     // 1. Obtener trades ya existentes
     const { data: existingTrades, error: errExist } = await supabase
       .from('trades')
-      .select('trade_code, strategy_id, stock_entry_price, first_buy_date, status, weekend_trader_flag')
+      .select('*, strategies(name)')
       .in('trade_code', uniqueCodes);
 
     if (errExist) {
@@ -894,7 +1304,7 @@ export async function syncTradesForCodes(
     // 2. Obtener las transacciones vinculadas
     const { data: txs, error: errTxs } = await supabase
       .from('transactions')
-      .select('*')
+      .select('*, strategies(name)')
       .in('trade_code', uniqueCodes)
       .order('date', { ascending: true });
 
@@ -912,7 +1322,40 @@ export async function syncTradesForCodes(
     const codesWithTxs = new Set(txsByCode.keys());
     const orphanCodes = uniqueCodes.filter(c => !codesWithTxs.has(c));
     if (orphanCodes.length > 0) {
-      await supabase.from('trades').delete().in('trade_code', orphanCodes).catch(() => {});
+      const { error: errDel } = await supabase.from('trades').delete().in('trade_code', orphanCodes);
+      if (errDel) {
+        console.warn('[syncTradesForCodes] Error deleting orphan trades from trades table:', errDel.message);
+      }
+    }
+
+    // 3. Obtener cotizaciones de MK-TOS en lote para los símbolos que se van a cerrar
+    const closedSymbols = Array.from(new Set(
+      Array.from(txsByCode.entries())
+        .filter(([_, codeTxs]) => calcularEstadoTradeDesdeTransacciones(codeTxs) === 'Closed')
+        .map(([code, codeTxs]) => (existingMap.get(code)?.symbol || codeTxs[0]?.symbol || '').trim().toUpperCase())
+        .filter(Boolean)
+    ));
+
+    const quotesBySymbol = new Map<string, any>();
+    if (closedSymbols.length > 0) {
+      try {
+        const { data: quotes } = await supabase
+          .from('mk_tos_quotes')
+          .select('symbol, last_price, mac_stop, trendpilot_stop, low_52, low_100_day, ema, bollinger_bands, quote_date')
+          .in('symbol', closedSymbols)
+          .order('quote_date', { ascending: false });
+
+        if (quotes) {
+          for (const q of quotes) {
+            const sym = (q.symbol || '').trim().toUpperCase();
+            if (!quotesBySymbol.has(sym)) {
+              quotesBySymbol.set(sym, q);
+            }
+          }
+        }
+      } catch (errQ: any) {
+        console.warn('[syncTradesForCodes] Warning fetching quotes for exit metrics:', errQ.message);
+      }
     }
 
     const tradesToUpsert: Partial<Trade>[] = [];
@@ -926,11 +1369,12 @@ export async function syncTradesForCodes(
         (t.action && t.action.toLowerCase().includes('buy'))
       ) || codeTxs[0];
 
-      const firstBuyDate = primeraCompra?.date || codeTxs[0]?.date || null;
-      const initialEntryPrice = primeraCompra?.stock_entry_price ?? (primeraCompra?.instrument === 'Stock' ? primeraCompra?.price : null);
-      const symbol = codeTxs[0]?.symbol || '';
-      const uniqueKey = codeTxs[0]?.unique_key || symbol;
-      const accountId = codeTxs[0]?.account_id || defaultAccountId || null;
+      const firstBuyDate = existing?.first_buy_date || primeraCompra?.date || codeTxs[0]?.date || null;
+      const instrument = (existing?.instrument || primeraCompra?.instrument || codeTxs[0]?.instrument || 'Stock') as 'Stock' | 'Option';
+      const initialEntryPrice = existing?.stock_entry_price ?? primeraCompra?.stock_entry_price ?? (instrument === 'Stock' ? primeraCompra?.price : null);
+      const symbol = existing?.symbol || codeTxs[0]?.symbol || '';
+      const uniqueKey = existing?.unique_key || codeTxs[0]?.unique_key || symbol;
+      const accountId = existing?.account_id || codeTxs[0]?.account_id || defaultAccountId || null;
 
       const txConStrategy = codeTxs.find(t => t.strategy_id !== null && t.strategy_id !== undefined);
       const strategyId = existing?.strategy_id ?? (txConStrategy?.strategy_id ?? null);
@@ -940,8 +1384,9 @@ export async function syncTradesForCodes(
 
       const normDateStr = firstBuyDate ? (parsearFechaTOS(firstBuyDate) || firstBuyDate.substring(0, 10)) : null;
       const isWeekendTrade = Boolean(
+        ((existing?.strategies as any)?.name || '').toLowerCase().includes('weekend') ||
         codeTxs.some(t => {
-          const sName = t.strategies?.name || t.strategy || '';
+          const sName = (t as any).strategies?.name || t.strategy || '';
           return sName.toLowerCase().includes('weekend');
         })
       );
@@ -950,6 +1395,12 @@ export async function syncTradesForCodes(
 
       let closedDateFromTx: string | null = null;
       let exitPriceFromTx: number | null = null;
+      let calculatedExitMetrics: { exit_price: number | null; exit_stop: number | null; exit_signal: number | null } = {
+        exit_price: null,
+        exit_stop: null,
+        exit_signal: null
+      };
+
       if (calculatedStatus === 'Closed') {
         const txsSell = codeTxs.filter(t => {
           const act = (t.action || '').trim().toLowerCase();
@@ -960,6 +1411,32 @@ export async function syncTradesForCodes(
           closedDateFromTx = parsearFechaTOS(lastSellTx.date) || lastSellTx.date.substring(0, 10);
           exitPriceFromTx = (lastSellTx.price && lastSellTx.price > 0) ? lastSellTx.price : null;
         }
+
+        const quote = quotesBySymbol.get(symbol.trim().toUpperCase()) || null;
+        const stratName = (existing?.strategies as any)?.name || (txConStrategy as any)?.strategies?.name || '';
+        calculatedExitMetrics = calculateStrategyExitMetrics(
+          stratName,
+          quote,
+          existing?.stock_entry_price ?? initialEntryPrice,
+          existing?.max_stock_price ?? null,
+          existing?.ratchet_stop ?? null,
+          existing?.weekend_trader_flag ?? initialWeekendFlag,
+          exitPriceFromTx
+        );
+      }
+
+      // Calcular cash_flow acumulado e initial_investment desde las transacciones del trade
+      const totalCashFlow = Number(
+        codeTxs.reduce((sum, t) => sum + (typeof t.amount === 'number' && !isNaN(t.amount) ? t.amount : 0), 0).toFixed(2)
+      );
+      let initialInvestment = 0;
+      if (primeraCompra) {
+        if (typeof primeraCompra.amount === 'number' && primeraCompra.amount !== 0) {
+          initialInvestment = Number(Math.abs(primeraCompra.amount).toFixed(2));
+        } else if (typeof primeraCompra.price === 'number' && typeof primeraCompra.quantity === 'number') {
+          const mult = instrument === 'Option' ? 100 : 1;
+          initialInvestment = Number(Math.abs(primeraCompra.price * primeraCompra.quantity * mult).toFixed(2));
+        }
       }
 
       if (!existing) {
@@ -967,6 +1444,7 @@ export async function syncTradesForCodes(
           trade_code: code,
           symbol,
           unique_key: uniqueKey,
+          instrument,
           strategy_id: strategyId,
           stock_entry_price: initialEntryPrice,
           first_buy_date: firstBuyDate,
@@ -974,37 +1452,53 @@ export async function syncTradesForCodes(
           weekend_trader_flag: calculatedStatus === 'Closed' ? false : initialWeekendFlag,
           max_stock_price: calculatedStatus === 'Closed' ? null : undefined,
           max_stock_price_date: calculatedStatus === 'Closed' ? null : undefined,
-          closed_date: calculatedStatus === 'Closed' ? closedDateFromTx : undefined,
-          exit_price: calculatedStatus === 'Closed' ? exitPriceFromTx : undefined,
+          closed_date: calculatedStatus === 'Closed' ? (closedDateFromTx || new Date().toISOString().substring(0, 10)) : undefined,
+          exit_price: calculatedStatus === 'Closed' ? (calculatedExitMetrics.exit_price ?? exitPriceFromTx) : undefined,
+          exit_stop: calculatedStatus === 'Closed' ? calculatedExitMetrics.exit_stop : undefined,
+          exit_signal: calculatedStatus === 'Closed' ? calculatedExitMetrics.exit_signal : undefined,
+          cash_flow: totalCashFlow,
+          initial_investment: initialInvestment,
+          realized_pnl: calculatedStatus === 'Closed' ? totalCashFlow : null,
           account_id: accountId
         });
       } else {
-        const updateObj: Partial<Trade> = {
-          trade_code: code,
+        const updateObj: Record<string, any> = {
+          status: calculatedStatus,
           symbol: existing.symbol || symbol,
           unique_key: existing.unique_key || uniqueKey,
-          status: calculatedStatus,
           first_buy_date: existing.first_buy_date || firstBuyDate,
-          stock_entry_price: existing.stock_entry_price ?? initialEntryPrice
+          stock_entry_price: existing.stock_entry_price ?? initialEntryPrice,
+          cash_flow: totalCashFlow,
+          initial_investment: initialInvestment > 0 ? initialInvestment : (existing.initial_investment ?? 0)
         };
         if (calculatedStatus === 'Closed') {
           updateObj.max_stock_price = null;
           updateObj.max_stock_price_date = null;
           updateObj.weekend_trader_flag = false;
-          if (!existing.closed_date && closedDateFromTx) {
-            updateObj.closed_date = closedDateFromTx;
-          }
-          if (!existing.exit_price && exitPriceFromTx) {
-            updateObj.exit_price = exitPriceFromTx;
-          }
-        } else if (isWeekendTrade && isBeforeCutoff) {
-          updateObj.weekend_trader_flag = true;
+          updateObj.closed_date = existing.closed_date || closedDateFromTx || new Date().toISOString().substring(0, 10);
+          updateObj.exit_price = existing.exit_price ?? (calculatedExitMetrics.exit_price ?? exitPriceFromTx);
+          updateObj.exit_stop = existing.exit_stop ?? calculatedExitMetrics.exit_stop;
+          updateObj.exit_signal = existing.exit_signal ?? calculatedExitMetrics.exit_signal;
+          updateObj.realized_pnl = totalCashFlow;
+        } else {
+          // Reversión explícita a Open: limpiar métricas y campos de cierre
+          updateObj.closed_date = null;
+          updateObj.exit_price = null;
+          updateObj.exit_stop = null;
+          updateObj.exit_signal = null;
+          updateObj.realized_pnl = null;
+          updateObj.weekend_trader_flag = isWeekendTrade && isBeforeCutoff;
         }
-        tradesToUpsert.push(updateObj);
-      }
 
-      // Sincronizar las transacciones hijas para que coincidan con el status calculado
-      await updateTransactionsByTradeCode(supabase, code, 'position_status', calculatedStatus).catch(() => {});
+        const { error: errUp } = await supabase
+          .from('trades')
+          .update(updateObj)
+          .eq('trade_code', code);
+
+        if (errUp) {
+          console.warn(`[syncTradesForCodes] Error updating trade ${code}:`, errUp.message);
+        }
+      }
     }
 
     if (tradesToUpsert.length > 0) {
@@ -1012,6 +1506,131 @@ export async function syncTradesForCodes(
     }
   } catch (error: any) {
     console.warn('[syncTradesForCodes] Error en sincronización:', error.message);
+  }
+}
+
+// 28b. Reconciliar el estado y métricas de todos los trades existentes en base a las transacciones
+export async function reconcileAllTradesStatus(supabase: SupabaseClient): Promise<number> {
+  try {
+    // 1. Obtener todos los trade_codes de transactions
+    const { data: txCodes, error: errTx } = await supabase
+      .from('transactions')
+      .select('trade_code');
+
+    if (errTx) {
+      console.warn('[reconcileAllTradesStatus] Error querying transactions:', errTx.message);
+      return 0;
+    }
+
+    // 2. Obtener todos los trade_codes de trades
+    const { data: tradeCodesData, error: errTr } = await supabase
+      .from('trades')
+      .select('trade_code');
+
+    if (errTr) {
+      console.warn('[reconcileAllTradesStatus] Error querying trades:', errTr.message);
+      return 0;
+    }
+
+    const allCodes = Array.from(new Set([
+      ...(txCodes || []).map((t: any) => Number(t.trade_code)),
+      ...(tradeCodesData || []).map((t: any) => Number(t.trade_code))
+    ])).filter(c => !isNaN(c) && c > 0);
+
+    if (allCodes.length === 0) return 0;
+
+    // Procesar en lotes de 100 para evitar límites de PostgREST
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < allCodes.length; i += BATCH_SIZE) {
+      const batch = allCodes.slice(i, i + BATCH_SIZE);
+      await syncTradesForCodes(supabase, batch);
+    }
+
+    return allCodes.length;
+  } catch (err: any) {
+    console.warn('[reconcileAllTradesStatus] Error during reconciliation:', err.message);
+    return 0;
+  }
+}
+
+// 28c. Rellenar métricas de salida para trades cerrados que carecen de exit_stop o exit_price (ej: cuando se sube MK-TOS con posterioridad)
+export async function backfillClosedTradesExitMetricsFromMkTos(
+  supabase: SupabaseClient,
+  symbols?: string[]
+): Promise<number> {
+  try {
+    let query = supabase
+      .from('trades')
+      .select('trade_code, symbol, strategy_id, stock_entry_price, max_stock_price, ratchet_stop, weekend_trader_flag, exit_price, exit_stop, exit_signal, strategies(name)')
+      .eq('status', 'Closed')
+      .or('exit_stop.is.null,exit_price.is.null');
+
+    if (symbols && symbols.length > 0) {
+      query = query.in('symbol', symbols.map(s => s.trim().toUpperCase()));
+    }
+
+    const { data: tradesToEnrich, error } = await query;
+    if (error || !tradesToEnrich || tradesToEnrich.length === 0) return 0;
+
+    const uniqueSymbols = Array.from(new Set((tradesToEnrich as any[]).map((t: any) => (t.symbol || '').trim().toUpperCase()).filter(Boolean)));
+    if (uniqueSymbols.length === 0) return 0;
+
+    const { data: quotes } = await supabase
+      .from('mk_tos_quotes')
+      .select('symbol, last_price, mac_stop, trendpilot_stop, low_52, low_100_day, ema, bollinger_bands, quote_date')
+      .in('symbol', uniqueSymbols)
+      .order('quote_date', { ascending: false });
+
+    const quotesBySymbol = new Map<string, any>();
+    if (quotes) {
+      for (const q of quotes) {
+        const sym = (q.symbol || '').trim().toUpperCase();
+        if (!quotesBySymbol.has(sym)) {
+          quotesBySymbol.set(sym, q);
+        }
+      }
+    }
+
+    let updatedCount = 0;
+    for (const tr of tradesToEnrich) {
+      const quote = quotesBySymbol.get((tr.symbol || '').trim().toUpperCase());
+      if (!quote) continue;
+
+      const stratName = (tr.strategies as any)?.name || '';
+      const metrics = calculateStrategyExitMetrics(
+        stratName,
+        quote,
+        tr.stock_entry_price,
+        tr.max_stock_price,
+        tr.ratchet_stop,
+        tr.weekend_trader_flag,
+        tr.exit_price
+      );
+
+      const updates: Record<string, any> = {};
+      if (tr.exit_stop === null || tr.exit_stop === undefined) {
+        updates.exit_stop = metrics.exit_stop;
+      }
+      if (tr.exit_price === null || tr.exit_price === undefined) {
+        updates.exit_price = metrics.exit_price;
+      }
+      if (tr.exit_signal === null || tr.exit_signal === undefined) {
+        updates.exit_signal = metrics.exit_signal;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        const { error: upErr } = await supabase
+          .from('trades')
+          .update(updates)
+          .eq('trade_code', tr.trade_code);
+        if (!upErr) updatedCount++;
+      }
+    }
+
+    return updatedCount;
+  } catch (err: any) {
+    console.warn('[backfillClosedTradesExitMetricsFromMkTos] Error:', err.message);
+    return 0;
   }
 }
 
@@ -1423,6 +2042,134 @@ export async function getPortfolioRiskSourceData(supabase: SupabaseClient): Prom
     strategies: activeStrategies || [],
     spyCloses: spyCloses || []
   };
+}
+
+// 40. Obtener trades nuevos o afectados que requieren revisión y enriquecimiento (strategy / stock_entry_price)
+export async function getTradesForEnrichment(
+  supabase: SupabaseClient,
+  tradeCodes: number[]
+): Promise<TradeEnrichmentItem[]> {
+  const uniqueCodes = Array.from(new Set(tradeCodes.filter(c => !isNaN(c) && c > 0)));
+  if (uniqueCodes.length === 0) return [];
+
+  // 1. Obtener trades desde la tabla maestra que estén ABIERTOS ('Open')
+  const { data: trades, error: errTrades } = await supabase
+    .from('trades')
+    .select('*')
+    .in('trade_code', uniqueCodes)
+    .eq('status', 'Open');
+
+  if (errTrades || !trades || trades.length === 0) return [];
+
+  // Filtrar solo los trades que realmente necesitan revisión:
+  // - No tienen strategy_id asignado, O
+  // - No tienen stock_entry_price asignado o es 0
+  const pendingTrades = trades.filter((tr: any) => 
+    tr.strategy_id === null || 
+    tr.strategy_id === undefined || 
+    tr.stock_entry_price === null || 
+    tr.stock_entry_price === undefined ||
+    tr.stock_entry_price === 0
+  );
+
+  if (pendingTrades.length === 0) return [];
+
+  // 2. Obtener transacciones vinculadas para inferir el tipo de instrumento (Stock u Option) y primera compra
+  const pendingCodes = pendingTrades.map((t: any) => Number(t.trade_code));
+  const { data: txs } = await supabase
+    .from('transactions')
+    .select('trade_code, symbol, instrument, price, amount, action, stock_entry_price, date')
+    .in('trade_code', pendingCodes)
+    .order('date', { ascending: true });
+
+  const txsByCode = new Map<number, any[]>();
+  for (const t of (txs || [])) {
+    const code = Number(t.trade_code);
+    if (!txsByCode.has(code)) txsByCode.set(code, []);
+    txsByCode.get(code)!.push(t);
+  }
+
+  // 3. Buscar precios sugeridos recientes en mk_tos_quotes
+  const symbols: string[] = Array.from(new Set<string>(
+    pendingTrades
+      .map((t: any) => (t.symbol ? String(t.symbol) : ''))
+      .filter((s: string) => s.length > 0)
+  ));
+  const latestQuotes = symbols.length > 0 ? await getLatestMkTosQuotes(supabase, symbols).catch(() => []) : [];
+  const quoteMap = new Map<string, number>();
+  for (const q of latestQuotes) {
+    if (q.symbol && q.last_price && !quoteMap.has(q.symbol)) {
+      quoteMap.set(q.symbol, q.last_price);
+    }
+  }
+
+  const items: TradeEnrichmentItem[] = [];
+  for (const tr of pendingTrades) {
+    const code = Number(tr.trade_code);
+    const codeTxs = txsByCode.get(code) || [];
+    const primeraCompra = codeTxs.find(t => 
+      (t.amount !== null && t.amount !== undefined && t.amount < 0) ||
+      (t.action && t.action.toLowerCase().includes('buy'))
+    ) || codeTxs[0];
+
+    const resolvedInstrument = tr.instrument || primeraCompra?.instrument || (tr.unique_key && (tr.unique_key.endsWith(' C') || tr.unique_key.endsWith(' P')) ? 'Option' : 'Stock');
+    const isStock = resolvedInstrument === 'Stock';
+    const instrument: 'Stock' | 'Option' = isStock ? 'Stock' : 'Option';
+    const suggestedPrice = quoteMap.get(tr.symbol) ?? null;
+
+    let stockEntryPrice = tr.stock_entry_price;
+    if (isStock && (stockEntryPrice === null || stockEntryPrice === 0)) {
+      stockEntryPrice = primeraCompra?.price ?? null;
+    } else if (!isStock && (stockEntryPrice === null || stockEntryPrice === 0) && suggestedPrice) {
+      stockEntryPrice = suggestedPrice;
+    }
+
+    items.push({
+      trade_code: code,
+      symbol: tr.symbol,
+      instrument,
+      strategy_id: tr.strategy_id ?? null,
+      stock_entry_price: stockEntryPrice ?? null,
+      is_stock: isStock,
+      suggested_price: suggestedPrice
+    });
+  }
+
+  return items.sort((a, b) => a.trade_code - b.trade_code);
+}
+
+// 41. Guardar masivamente enriquecimientos de trades (estrategias y precios de entrada)
+export async function batchUpdateTradesEnrichment(
+  supabase: SupabaseClient,
+  items: { trade_code: number; strategy_id: number | null; stock_entry_price: number | null }[]
+): Promise<void> {
+  if (!items || items.length === 0) return;
+
+  const tradeCodesToSync: number[] = [];
+
+  for (const item of items) {
+    const { trade_code, strategy_id, stock_entry_price } = item;
+    if (!trade_code || isNaN(trade_code)) continue;
+
+    tradeCodesToSync.push(trade_code);
+
+    // 1. Actualizar tabla maestra trades
+    await updateTradeField(supabase, trade_code, 'strategy_id', strategy_id);
+    await updateTradeField(supabase, trade_code, 'stock_entry_price', stock_entry_price);
+
+    // 2. Propagar a transacciones asociadas
+    if (strategy_id !== undefined) {
+      await updateTransactionsByTradeCode(supabase, trade_code, 'strategy_id', strategy_id).catch(() => {});
+    }
+    if (stock_entry_price !== undefined) {
+      await updateTransactionsByTradeCode(supabase, trade_code, 'stock_entry_price', stock_entry_price).catch(() => {});
+    }
+  }
+
+  // 3. Sincronizar trades para recalcular flags y consistencia
+  if (tradeCodesToSync.length > 0) {
+    await syncTradesForCodes(supabase, tradeCodesToSync).catch(() => {});
+  }
 }
 
 

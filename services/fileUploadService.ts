@@ -25,7 +25,10 @@ import {
   deletePositionsByFileUploadId,
   deleteTransactionsByFileUploadId,
   deleteMkTosQuotesByFileUploadId,
-  syncTradesForCodes
+  resolveAndAssignTradesForTransactions,
+  syncTradesForCodes,
+  reconcileAllTradesStatus,
+  backfillClosedTradesExitMetricsFromMkTos
 } from './queries';
 import { procesarFilasPosiciones } from '../lib/positionsParser';
 import { procesarFilasTransacciones, limpiarTextoCsv, extraerAccountIdDesdeNombre } from '../lib/transactionsParser';
@@ -39,6 +42,7 @@ export interface IngestionResult {
   count: number;
   message: string;
   error?: string;
+  tradeCodes?: number[];
 }
 
 /**
@@ -237,25 +241,53 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
           });
           fileRecordId = fileRecord.id;
 
-          // 3. Insertar transacciones asociadas
+          // 3. Resolver/generar trade_code primero en la tabla maestra 'trades' usando unique_key
           const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
-          await insertTransactions(supabase, filasConArchivo);
+          const { rowsWithCodes, tradeCodes: resolvedCodes } = await resolveAndAssignTradesForTransactions(
+            supabase,
+            filasConArchivo,
+            accountId
+          );
 
-          // 4. Sincronizar tabla trades automáticamente
-          // Obtener los trade_codes reales asignados por el trigger de base de datos
+          // 4. Insertar transacciones haciendo referencia al trade_code de 'trades'
+          await insertTransactions(supabase, rowsWithCodes);
+
+          // 5. Consolidar estado y métricas finales en la tabla maestra 'trades'
           const { data: insertedTxs } = await supabase
             .from('transactions')
             .select('trade_code')
-            .eq('file_upload_id', fileRecord.id);
+            .eq('file_upload_id', fileRecord.id)
+            .limit(100000);
 
-          const tradeCodes: number[] = Array.from(new Set<number>(
-            (insertedTxs || [])
+          const tradeCodes: number[] = Array.from(new Set<number>([
+            ...resolvedCodes,
+            ...(insertedTxs || [])
               .map((t: any) => Number(t.trade_code))
               .filter((c: any): c is number => !isNaN(c) && c > 0)
-          ));
+          ]));
 
+          // Sincronizar trades (actualiza métricas y cierres de los códigos afectados)
+          let pendingTradeCodes: number[] = [];
           if (tradeCodes.length > 0) {
             await syncTradesForCodes(supabase, tradeCodes, accountId);
+
+            // Identificar directamente en 'trades' cuáles están ABIERTOS y necesitan enriquecimiento
+            // (no tienen estrategia o no tienen precio de entrada del subyacente)
+            const { data: tradesInDb } = await supabase
+              .from('trades')
+              .select('trade_code, strategy_id, stock_entry_price, status')
+              .in('trade_code', tradeCodes)
+              .eq('status', 'Open');
+
+            pendingTradeCodes = (tradesInDb || [])
+              .filter((tr: any) => 
+                tr.strategy_id === null || 
+                tr.strategy_id === undefined || 
+                tr.stock_entry_price === null || 
+                tr.stock_entry_price === undefined ||
+                tr.stock_entry_price === 0
+              )
+              .map((tr: any) => Number(tr.trade_code));
           }
 
           resolve({
@@ -263,7 +295,8 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
             module: 'transactions',
             fileName: file.name,
             count: filasProcesadas.length,
-            message: `Successfully processed ${filasProcesadas.length} transactions.`
+            message: `Successfully processed ${filasProcesadas.length} transactions.`,
+            tradeCodes: pendingTradeCodes
           });
         } catch (err: any) {
           // Rollback transaccional
@@ -385,6 +418,12 @@ export async function processMkTosUpload(file: File, supabase: any): Promise<Ing
             spyWarning = ' (Warning: SPY row with Last and SMA 10W not found in this file)';
           }
 
+          // 5. Backfill de métricas de salida para trades cerrados que carecían de cotizaciones
+          const symbolsEnArchivo = Array.from(new Set(filasProcesadas.map(f => (f.symbol || '').trim().toUpperCase()).filter(Boolean)));
+          if (symbolsEnArchivo.length > 0) {
+            await backfillClosedTradesExitMetricsFromMkTos(supabase, symbolsEnArchivo).catch(() => {});
+          }
+
           resolve({
             success: true,
             module: 'mk-tos',
@@ -435,7 +474,13 @@ export async function reprocessUploadedFile(fileRecord: FileUpload, supabase: an
           try {
             const filasProcesadas = procesarFilasTransacciones(results.data, accountId, id);
             await deleteTransactionsByFileUploadId(supabase, id);
-            await insertTransactions(supabase, filasProcesadas);
+
+            const { rowsWithCodes, tradeCodes: resolvedCodes } = await resolveAndAssignTradesForTransactions(
+              supabase,
+              filasProcesadas,
+              accountId
+            );
+            await insertTransactions(supabase, rowsWithCodes);
 
             // Sincronizar tabla trades automáticamente con los trade_codes asignados
             const { data: insertedTxs } = await supabase
@@ -443,11 +488,12 @@ export async function reprocessUploadedFile(fileRecord: FileUpload, supabase: an
               .select('trade_code')
               .eq('file_upload_id', id);
 
-            const tradeCodes: number[] = Array.from(new Set<number>(
-              (insertedTxs || [])
+            const tradeCodes: number[] = Array.from(new Set<number>([
+              ...resolvedCodes,
+              ...(insertedTxs || [])
                 .map((t: any) => Number(t.trade_code))
                 .filter((c: any): c is number => !isNaN(c) && c > 0)
-            ));
+            ]));
 
             if (tradeCodes.length > 0) {
               await syncTradesForCodes(supabase, tradeCodes, accountId);
@@ -524,7 +570,8 @@ export async function deleteUploadedFileCompletely(fileRecord: FileUpload, supab
     const { data: affectedTxs } = await supabase
       .from('transactions')
       .select('trade_code')
-      .eq('file_upload_id', id);
+      .eq('file_upload_id', id)
+      .limit(100000);
 
     const affectedCodes: number[] = Array.from(new Set(
       (affectedTxs || [])
@@ -536,7 +583,7 @@ export async function deleteUploadedFileCompletely(fileRecord: FileUpload, supab
     await deleteTransactionsByFileUploadId(supabase, id).catch(() => {});
     await eliminarArchivoStorage(storage_path).catch(() => {});
 
-    // 3. Rollback automático: recalcular balance neto (Opción 1) de los trades restantes
+    // 3. Rollback automático: recalcular balance neto de los trades afectados
     if (affectedCodes.length > 0) {
       await syncTradesForCodes(supabase, affectedCodes);
     }

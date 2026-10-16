@@ -51,6 +51,8 @@ The project enforces a strict separation of concerns across 4 distinct layers:
 3. **Strict Typing:** 
    * All domain models (`Transaction`, `Position`, `Strategy`, `Profile`) must be defined in `types/index.tsx`.
    * Never use `any` when a known schema exists.
+4. **Anti-Duplication (DRY Verification):**
+   * Before creating a new service, query, parser/helper function, or adding a new field to a type or database table, **always audit existing files** (`services/queries.tsx`, `services/fileUploadService.ts`, `lib/`, and `types/index.tsx`) to verify that an equivalent service, function, or field does not already exist. Reuse and extend existing structures instead of duplicating them.
 
 ---
 

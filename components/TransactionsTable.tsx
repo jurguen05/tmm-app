@@ -131,20 +131,15 @@ export default function TransactionsTable({
                 <td className={tdRight}>{formatearMoneda(t.amount)}</td>
                 
                 <td className="px-4 py-3 text-sm text-center">
-                  <button
-                    onClick={() => {
-                      const nuevoStatus = t.position_status === 'Open' ? 'Closed' : 'Open';
-                      onActualizarTransaccion(t.id, 'position_status', nuevoStatus);
-                    }}
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-all cursor-pointer border ${
+                  <span
+                    className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
                       t.position_status === 'Open' 
-                        ? 'bg-green-100 text-green-800 border-green-200 hover:bg-green-200' 
-                        : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+                        ? 'bg-green-100 text-green-800 border-green-200' 
+                        : 'bg-gray-100 text-gray-700 border-gray-200'
                     }`}
-                    title="Hacé clic para alternar el estado (Open / Closed) de todo el trade"
                   >
                     {t.position_status || 'Open'}
-                  </button>
+                  </span>
                 </td>
                 
                  {/*<td className="px-4 py-3 text-sm text-gray-900 font-bold whitespace-nowrap text-center">{t.unique_key}</td>*/}

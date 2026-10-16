@@ -218,13 +218,16 @@ export const calcularAssetAllocation = (
 
   const txsByKey = new Map<string, Transaction[]>();
   (transactions || []).forEach(tx => {
-    const nk = normalizeUniqueKey(tx.unique_key);
+    const parentTrade = (tx.trade_code !== null && tx.trade_code !== undefined)
+      ? tradesByCode.get(Number(tx.trade_code))
+      : undefined;
+    const nk = normalizeUniqueKey(parentTrade?.unique_key || tx.unique_key);
     if (nk) {
       const arr = txsByKey.get(nk) || [];
       arr.push(tx);
       txsByKey.set(nk, arr);
     }
-    const sym = (tx.symbol || '').trim().toUpperCase();
+    const sym = (parentTrade?.symbol || tx.symbol || '').trim().toUpperCase();
     if (sym && sym !== nk) {
       const arrSym = txsByKey.get(sym) || [];
       arrSym.push(tx);

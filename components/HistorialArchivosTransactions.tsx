@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { FileUpload } from '../types'
 import { getFileUploads } from '../services/queries'
 import { deleteUploadedFileCompletely, processTransactionsUpload } from '../services/fileUploadService'
+import ReviewNewTradesModal from './ReviewNewTradesModal'
 
 export default function HistorialArchivosTransactions() {
   const router = useRouter()
@@ -14,6 +15,8 @@ export default function HistorialArchivosTransactions() {
   const [subiendo, setSubiendo] = useState(false)
   const [colapsado, setColapsado] = useState(true)
   const [mensaje, setMensaje] = useState('')
+  const [reviewTradeCodes, setReviewTradeCodes] = useState<number[]>([])
+  const [reviewModalOpen, setReviewModalOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const cargarArchivos = async () => {
@@ -46,6 +49,13 @@ export default function HistorialArchivosTransactions() {
         if (fileInputRef.current) fileInputRef.current.value = ''
         await cargarArchivos()
         router.refresh()
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('transactions-changed'))
+        }
+        if (result.tradeCodes && result.tradeCodes.length > 0) {
+          setReviewTradeCodes(result.tradeCodes)
+          setReviewModalOpen(true)
+        }
       } else {
         setMensaje(`⚠️ ${result.message}`)
       }
@@ -67,6 +77,9 @@ export default function HistorialArchivosTransactions() {
       setMensaje(`✅ File deleted successfully.`)
       cargarArchivos()
       router.refresh()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('transactions-changed'))
+      }
     } catch (err: any) {
       setMensaje(`⚠️ Error deleting file: ${err.message}`)
     }
@@ -166,6 +179,21 @@ export default function HistorialArchivosTransactions() {
             </div>
           )}
         </>
+      )}
+
+      {reviewModalOpen && (
+        <ReviewNewTradesModal
+          isOpen={reviewModalOpen}
+          tradeCodes={reviewTradeCodes}
+          onClose={() => setReviewModalOpen(false)}
+          onSaved={() => {
+            setReviewModalOpen(false)
+            router.refresh()
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('transactions-changed'))
+            }
+          }}
+        />
       )}
     </div>
   )

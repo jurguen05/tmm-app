@@ -12,15 +12,12 @@ import {
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
   updateTradesRatchetStops,
-  closeTradeWithExitMetrics,
-  syncTradesForCodes,
   getSpyDailyCloses,
   autoArchiveOldMkTosFiles,
   getStrategiesStopsFreshness,
   FreshnessStatus
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
-import { calcularEstadoTradeDesdeTransacciones } from '../../../lib/transactionsParser'
 import { formatearFecha } from '../../../lib/formatters'
 
 export const instant = false
@@ -132,18 +129,6 @@ export default async function StrategiesStopsPage() {
       .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
       .map(c => Number(c.trade_code));
 
-    const codesToAutoClose: number[] = []
-
-    // Indexar transacciones por trade_code para evaluar balance neto
-    const txsByTradeCode = new Map<number, typeof prefetchedTxs>()
-    allRelevantTransactions.forEach(t => {
-      if (t.trade_code) {
-        const c = Number(t.trade_code)
-        if (!txsByTradeCode.has(c)) txsByTradeCode.set(c, [])
-        txsByTradeCode.get(c)!.push(t)
-      }
-    })
-
     // Detectar trades marcados como 'Open' pero ausentes en el Position Statement de hoy (Opción 2 con aviso)
     const activeConsolidatedCodes = new Set(
       consolidado
@@ -155,15 +140,6 @@ export default async function StrategiesStopsPage() {
     )
 
     missingOpenTrades = (openTrades || []).filter(tr => {
-      const c = Number(tr.trade_code)
-      const tradeTxs = txsByTradeCode.get(c) || []
-
-      // Si el historial de transacciones ya muestra que la posición neta es 0, el trade ya fue cerrado
-      if (tradeTxs.length > 0 && calcularEstadoTradeDesdeTransacciones(tradeTxs) === 'Closed') {
-        codesToAutoClose.push(c)
-        return false
-      }
-
       const matchCode = tr.trade_code && activeConsolidatedCodes.has(String(tr.trade_code))
       const matchSymbol = tr.symbol && activePositionSymbols.has(tr.symbol.trim().toUpperCase())
       return !matchCode && !matchSymbol
@@ -180,20 +156,6 @@ export default async function StrategiesStopsPage() {
       }
       if (tradesWithRatchet.length > 0) {
         await updateTradesRatchetStops(supabase, tradesWithRatchet).catch(() => {})
-      }
-      if (codesToAutoClose.length > 0) {
-        await Promise.all(codesToAutoClose.map(async (c) => {
-          const match = consolidado.find(d => Number(d.trade_code) === c);
-          if (match) {
-            await closeTradeWithExitMetrics(supabase, c, {
-              exit_stop: typeof match.stop === 'number' ? match.stop : null,
-              exit_price: match.lastPrice || null,
-              exit_signal: match.signal ?? null,
-              closed_date: new Date().toISOString().substring(0, 10)
-            });
-          }
-        })).catch(() => {});
-        await syncTradesForCodes(supabase, codesToAutoClose).catch(() => {})
       }
       // Solo archivar automáticamente si la persistencia de picos no tuvo errores
       if (maxUpdatesFailed === 0) {
