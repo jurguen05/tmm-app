@@ -99,7 +99,7 @@ export default function TransactionsTable({
 
               return (
                 <Fragment key={group.groupKey}>
-                  {/* Encabezado Maestro del Trade: Compacto y armónico */}
+                  {/* Encabezado Maestro del Trade: Mismo color de fondo continuo, letras en negro y en negrita */}
                   <tr
                     onClick={() => onToggleExpand(group.groupKey)}
                     className={`cursor-pointer transition-colors border-l-4 ${
@@ -110,24 +110,24 @@ export default function TransactionsTable({
                   >
                     <td colSpan={6} className="px-3.5 py-2">
                       <div className="flex items-center justify-between gap-4">
-                        {/* Lado Izquierdo: Flecha + Code + Symbol + Strategy + Stock Entry Price + Status (mismo fondo blanco y en negrita) */}
-                        <div className="flex flex-wrap items-center gap-3">
+                        {/* Lado Izquierdo: Flecha + Code + Symbol + Strategy + Stock Entry Price + Status */}
+                        <div className="flex flex-wrap items-center gap-3.5">
                           {/* Flecha desplegable */}
                           <span
                             className={`inline-block text-xs font-bold transition-transform ${
-                              isExpanded ? 'rotate-90 text-indigo-700' : 'text-slate-500'
+                              isExpanded ? 'rotate-90 text-black' : 'text-black'
                             }`}
                           >
                             ▶
                           </span>
 
                           {/* 1. trade_code */}
-                          <span className="text-sm font-bold text-indigo-700 tracking-tight min-w-[2rem]">
+                          <span className="text-sm font-bold text-black tracking-tight min-w-[2rem]">
                             {group.trade_code || '-'}
                           </span>
 
                           {/* 2. Symbol */}
-                          <span className="text-sm font-bold text-gray-900 min-w-[3rem]">
+                          <span className="text-sm font-bold text-black min-w-[3rem]">
                             {group.symbol}
                           </span>
 
@@ -139,11 +139,11 @@ export default function TransactionsTable({
                                 const nuevoId = e.target.value ? Number(e.target.value) : null
                                 onActualizarTradeGroup(group, 'strategy_id', nuevoId)
                               }}
-                              className="px-2.5 py-1 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900 shadow-2xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              className="px-2 py-0.5 border border-slate-300 rounded text-xs font-bold bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
                             >
-                              <option value="">Select strategy...</option>
+                              <option value="" className="bg-white text-black">Select strategy...</option>
                               {estrategias.map((est) => (
-                                <option key={est.id} value={est.id}>
+                                <option key={est.id} value={est.id} className="bg-white text-black">
                                   {est.name}
                                 </option>
                               ))}
@@ -152,10 +152,10 @@ export default function TransactionsTable({
 
                           {/* 4. Stock Entry Price */}
                           <div
-                            className="flex items-center gap-1.5 text-xs font-bold"
+                            className="flex items-center gap-1.5 text-xs font-bold text-black"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <span className="text-gray-600 font-bold">Stock Entry Price:</span>
+                            <span className="text-black font-bold">Stock Entry Price:</span>
                             {(() => {
                               const buys = group.transactions.filter(
                                 (tx) => /bot|buy/i.test(tx.action || '') || tx.amount < 0
@@ -178,7 +178,7 @@ export default function TransactionsTable({
                                         if (e.key === 'Escape') setEditingPriceTarget(null)
                                       }}
                                       placeholder="0.00"
-                                      className="w-20 px-2 py-0.5 border border-indigo-500 rounded text-xs font-bold text-right bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                      className="w-20 px-1.5 py-0.5 border border-slate-400 rounded text-xs font-bold text-right bg-transparent text-black focus:outline-none focus:ring-1 focus:ring-slate-500"
                                     />
                                   )
                                 }
@@ -188,7 +188,7 @@ export default function TransactionsTable({
                                     onClick={() =>
                                       handleStartEditPrice(bannerEditKey, group.stock_entry_price)
                                     }
-                                    className="px-2.5 py-0.5 rounded bg-white border border-gray-300 font-bold text-gray-900 hover:border-indigo-500 hover:text-indigo-700 transition cursor-pointer"
+                                    className="px-2 py-0.5 rounded border border-slate-300 bg-transparent font-bold text-black hover:border-slate-400 transition cursor-pointer"
                                     title="Click to edit Stock Entry Price (Option trade)"
                                   >
                                     {group.stock_entry_price
@@ -200,7 +200,7 @@ export default function TransactionsTable({
 
                               return (
                                 <span
-                                  className="px-2.5 py-0.5 rounded bg-white border border-gray-300 font-bold text-gray-900 select-none cursor-default"
+                                  className="px-2 py-0.5 rounded border border-slate-300 bg-transparent font-bold text-black select-none cursor-default"
                                   title="Calculated from Stock fill price (read-only)"
                                 >
                                   {group.stock_entry_price
@@ -213,19 +213,15 @@ export default function TransactionsTable({
 
                           {/* Status */}
                           <span
-                            className={`inline-block px-2.5 py-0.5 rounded text-xs font-bold border ${
-                              group.status === 'Open'
-                                ? 'bg-white text-green-700 border-green-300'
-                                : 'bg-white text-gray-700 border-gray-300'
-                            }`}
+                            className="inline-block px-2.5 py-0.5 rounded text-xs font-bold border border-slate-300 bg-transparent text-black"
                           >
                             {group.status}
                           </span>
                         </div>
 
                         {/* Lado Derecho: Fills alineado hacia la derecha */}
-                        <div className="pr-2">
-                          <span className="px-2.5 py-0.5 rounded bg-white border border-gray-300 text-xs font-bold text-gray-800 whitespace-nowrap shadow-2xs">
+                        <div className="pr-1">
+                          <span className="px-2.5 py-0.5 rounded border border-slate-300 bg-transparent text-xs font-bold text-black whitespace-nowrap">
                             {group.transactions.length}{' '}
                             {group.transactions.length === 1 ? 'fill' : 'fills'}
                           </span>
