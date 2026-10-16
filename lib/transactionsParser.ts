@@ -14,11 +14,10 @@ export interface ParsedTransactionRow {
   price: number;
   fees: number;
   amount: number;
-  position_status: 'Open' | 'Closed';
-  strategy_id: number | null;
-  stock_entry_price: number | null;
   file_upload_id?: string;
   description?: string | null;
+  _isExistingDuplicate?: boolean;
+  _origIdx?: number;
 }
 
 /**
@@ -71,9 +70,6 @@ export const procesarFilasTransacciones = (
     const parsedCode = rawCode ? parseInt(rawCode.toString().replace(/[^0-9.-]+/g, ''), 10) : null;
     const finalTradeCode = parsedCode !== null && !isNaN(parsedCode) ? parsedCode : null;
 
-    const rawStatus = (row['position_status'] || row['status'] || 'Open').toString().trim();
-    const positionStatus: 'Open' | 'Closed' = rawStatus.toLowerCase() === 'closed' ? 'Closed' : 'Open';
-
     const rawPrice = normalizeNumber(row['Price'] || row['price']);
     const parsedQty = (row['Quantity'] || row['quantity'])
       ? parseFloat((row['Quantity'] || row['quantity']).toString().replace(/[^0-9.-]+/g, ''))
@@ -89,10 +85,6 @@ export const procesarFilasTransacciones = (
     // Para compras/ventas estándar se guarda magnitud positiva; para líneas de fusión/reorg sin Buy/Sell se preserva el signo (+/-)
     const rawQty = isNaN(parsedQty) ? 0 : (isStandardBuyOrSell ? Math.abs(parsedQty) : parsedQty);
 
-    const stockEntryPrice = instrument === 'Stock' 
-      ? rawPrice 
-      : (row['stock_entry_price'] ? normalizeNumber(row['stock_entry_price']) : null);
-
     const fila: ParsedTransactionRow = {
       account_id: accountId,
       trade_code: finalTradeCode,
@@ -105,9 +97,6 @@ export const procesarFilasTransacciones = (
       price: rawPrice,
       fees: normalizeNumber(row['Fees & Comm'] || row['fees'] || row['Fees']),
       amount: normalizeNumber(row['Amount'] || row['amount']),
-      position_status: positionStatus,
-      strategy_id: row['strategy_id'] ? parseInt(row['strategy_id'], 10) : null,
-      stock_entry_price: stockEntryPrice,
       description: row['description'] || row['Description'] || null
     };
 
@@ -164,43 +153,93 @@ export const extraerAccountIdDesdeNombre = (fileName: string, fallback = 'DESCON
 };
 
 /**
- * Calcula el estado de un trade ('Open' o 'Closed') sumando las cantidades de todas las
- * transacciones del trade_code sin importar el instrumento, símbolo o unique_key
- * (soporta fusiones/cambios de ticker dentro del mismo trade_code).
+ * Determina el delta (+ o -) de la cantidad de una transacción según su Action:
+ * - Buy to Open: +
+ * - Buy: +
+ * - Sell to Open: +
+ * - Sell to Close: -
+ * - Expired: -
+ * - Sell: -
+ * - Buy to Close: -
  */
-export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Open' | 'Closed' => {
-  if (!transacciones || transacciones.length === 0) return 'Closed';
+export const calcularDeltaQuantity = (action: string | undefined | null, rawQty: number): number => {
+  const act = (action || '').trim().toLowerCase();
+  const absQty = Math.abs(rawQty);
+
+  if (act.includes('buy to close') || act.includes('btc')) {
+    return -absQty;
+  }
+  if (act.includes('sell to open') || act.includes('sto')) {
+    return absQty;
+  }
+  if (act.includes('buy to open') || act.includes('bto')) {
+    return absQty;
+  }
+  if (act.includes('sell to close') || act.includes('stc')) {
+    return -absQty;
+  }
+  if (act.includes('exp')) {
+    return -absQty;
+  }
+  if (act.includes('sell') || act.includes('sold')) {
+    return -absQty;
+  }
+  if (act.includes('buy') || act.includes('bot') || act.includes('bought')) {
+    return absQty;
+  }
+
+  if (rawQty < 0) return -absQty;
+  if (rawQty > 0) return absQty;
+  return 0;
+};
+
+/**
+ * Calcula la cantidad neta actual de un trade (current_quantity) sumando y restando
+ * las cantidades de todas las transacciones del trade_code de manera unificada.
+ * Devuelve 0 si la posición está totalmente liquidada/cerrada.
+ */
+export const calcularCurrentQuantityDesdeTransacciones = (transacciones: any[]): number => {
+  if (!transacciones || transacciones.length === 0) return 0;
+
+  // Ordenar siempre cronológicamente de forma ascendente (más antiguo primero)
+  const sorted = [...transacciones].sort((a, b) => {
+    const dateA = String(a.date || '');
+    const dateB = String(b.date || '');
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    const actA = String(a.action || '').toLowerCase();
+    const actB = String(b.action || '').toLowerCase();
+    const isCloseA = actA.includes('sell') || actA.includes('exp') || actA.includes('close');
+    const isCloseB = actB.includes('sell') || actB.includes('exp') || actB.includes('close');
+    if (!isCloseA && isCloseB) return -1;
+    if (isCloseA && !isCloseB) return 1;
+    return (a.created_at || '').localeCompare(b.created_at || '');
+  });
 
   let netQty = 0;
 
-  for (const t of transacciones) {
-    const act = (t.action || '').trim().toLowerCase();
+  for (const t of sorted) {
     const rawQty = Number(t.quantity) || 0;
-    const absQty = Math.abs(rawQty);
-
+    const delta = calcularDeltaQuantity(t.action, rawQty);
+    const act = (t.action || '').trim().toLowerCase();
     const isExp = act.includes('exp');
-    const isSell =
-      act.includes('sell') ||
-      act.includes('sold') ||
-      isExp ||
-      rawQty < 0 ||
-      (t.amount !== null && t.amount !== undefined && t.amount > 0);
-    const isBuy =
-      !isSell &&
-      (act.includes('buy') ||
-        act.includes('bot') ||
-        act.includes('bought') ||
-        (t.amount !== null && t.amount !== undefined && t.amount < 0) ||
-        rawQty > 0);
-
-    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
 
     if (isExp) {
-      netQty = absQty === 0 ? 0 : Math.max(0, netQty + delta);
+      netQty = Math.abs(rawQty) === 0 ? 0 : Math.max(0, netQty + delta);
     } else {
       netQty += delta;
     }
   }
 
-  return Math.abs(netQty) > 0.0001 ? 'Open' : 'Closed';
+  return Math.abs(netQty) <= 0.0001 ? 0 : Number(Math.max(0, netQty).toFixed(4));
 };
+
+/**
+ * Calcula el estado de un trade ('Open' o 'Closed') evaluando si su cantidad neta
+ * acumulada es mayor a cero.
+ */
+export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Open' | 'Closed' => {
+  const currentQty = calcularCurrentQuantityDesdeTransacciones(transacciones);
+  return currentQty > 0.0001 ? 'Open' : 'Closed';
+};
+
+

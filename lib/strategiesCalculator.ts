@@ -178,21 +178,28 @@ export const consolidarStrategiesStops = (
     }
   }
 
-  // Indexar trades de la tabla maestra si fueron provistos (priorizando status === 'Open' por unique_key)
+  // Indexar trades de la tabla maestra si fueron provistos (priorizando status === 'Open' por unique_key y symbol)
   const tradesByCode = new Map<number, Trade>();
   const tradesByKey = new Map<string, Trade>();
+  const openTradesBySymbol = new Map<string, Trade>();
   if (trades && trades.length > 0) {
     for (const tr of trades) {
       if (tr.trade_code !== null && tr.trade_code !== undefined && !isNaN(Number(tr.trade_code))) {
         tradesByCode.set(Number(tr.trade_code), tr);
       }
+      const currentIsOpen = (tr.status || '').toLowerCase() === 'open';
       if (tr.unique_key) {
         const nk = normalizeUniqueKey(tr.unique_key);
         const existing = tradesByKey.get(nk);
         const existingIsOpen = existing && (existing.status || '').toLowerCase() === 'open';
-        const currentIsOpen = (tr.status || '').toLowerCase() === 'open';
         if (!existing || (!existingIsOpen && currentIsOpen)) {
           tradesByKey.set(nk, tr);
+        }
+      }
+      if (tr.symbol && currentIsOpen) {
+        const sym = tr.symbol.trim().toUpperCase();
+        if (!openTradesBySymbol.has(sym)) {
+          openTradesBySymbol.set(sym, tr);
         }
       }
     }
@@ -241,16 +248,37 @@ export const consolidarStrategiesStops = (
   );
 
   // Pre-indexar transacciones una sola vez (evita O(posiciones × transacciones))
+  // En caso de rolleos: solo indexar en openTradeByTxKey si la transacción y el trade maestro están ABIERTOS
+  const openTradeByTxKey = new Map<string, Trade>();
   const txsByNormKey = new Map<string, Transaction[]>();
   const txsByTradeCode = new Map<string, Transaction[]>();
+
   for (const t of transactions || []) {
     const parentTrade = (t.trade_code !== null && t.trade_code !== undefined)
       ? tradesByCode.get(Number(t.trade_code))
       : undefined;
-    const nk = normalizeUniqueKey(parentTrade?.unique_key || t.unique_key);
-    if (nk) {
-      const byKey = txsByNormKey.get(nk);
-      if (byKey) byKey.push(t); else txsByNormKey.set(nk, [t]);
+
+    const masterStatus = parentTrade?.status || t.trade?.status;
+    const isTxOpen = masterStatus ? masterStatus.toLowerCase() === 'open' : true;
+    const isParentTradeOpen = (parentTrade?.status || '').toLowerCase() === 'open';
+
+    // Regla de rolleos: Solo vincular por unique_key si la transacción está ABIERTA en un trade ABIERTO
+    if (isTxOpen && isParentTradeOpen && t.unique_key && parentTrade) {
+      const normTxKey = normalizeUniqueKey(t.unique_key);
+      if (normTxKey && !openTradeByTxKey.has(normTxKey)) {
+        openTradeByTxKey.set(normTxKey, parentTrade);
+      }
+    }
+
+    const keysToAdd = new Set<string>();
+    if (t.unique_key) keysToAdd.add(normalizeUniqueKey(t.unique_key));
+    if (parentTrade?.unique_key) keysToAdd.add(normalizeUniqueKey(parentTrade.unique_key));
+
+    for (const k of keysToAdd) {
+      if (k) {
+        const byKey = txsByNormKey.get(k);
+        if (byKey) byKey.push(t); else txsByNormKey.set(k, [t]);
+      }
     }
 
     if (t.trade_code !== null && t.trade_code !== undefined) {
@@ -262,11 +290,22 @@ export const consolidarStrategiesStops = (
 
   const consolidado: ConsolidatedStrategyStop[] = positions.map((pos) => {
     const posNormKey = normalizeUniqueKey(pos.unique_key);
-    const masterByKey = tradesByKey.get(posNormKey);
-    const txsDelCodigo = txsByNormKey.get(posNormKey) || [];
+    const posSym = (pos.symbol || '').trim().toUpperCase();
     
-    // Filtrar transacciones abiertas ordenadas de más reciente a más antigua
-    const txsOpen = txsDelCodigo.filter(t => (t.trade?.status || t.position_status || 'Open').toLowerCase() === 'open');
+    // 1. Buscar trade maestro por unique_key exacto
+    // 2. En caso de rolleo: buscar el trade maestro de una transacción ABIERTA que tenga ese unique_key
+    // 3. Fallback de símbolo: si es una posición en acciones, buscar el único trade maestro con status 'Open' para ese símbolo
+    const masterByKey = tradesByKey.get(posNormKey)
+      || openTradeByTxKey.get(posNormKey)
+      || (posSym ? openTradesBySymbol.get(posSym) : undefined);
+    const txsDelCodigo = txsByNormKey.get(posNormKey) || (posSym ? txsByNormKey.get(posSym) : []) || [];
+    
+    // Filtrar transacciones abiertas ordenadas de más reciente a más antigua (priorizando status del trade maestro)
+    const txsOpen = txsDelCodigo.filter(t => {
+      const pt = (t.trade_code !== null && t.trade_code !== undefined) ? tradesByCode.get(Number(t.trade_code)) : undefined;
+      const st = pt?.status || t.trade?.status || 'Open';
+      return st.toLowerCase() === 'open';
+    });
     const txsOpenOrdenadas = [...txsOpen].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     
     const trade_code = (masterByKey && (masterByKey.status || '').toLowerCase() === 'open' && masterByKey.trade_code)
@@ -276,10 +315,12 @@ export const consolidarStrategiesStops = (
           : (masterByKey?.trade_code ? String(masterByKey.trade_code) : '-'));
       
     const strategy = txsOpenOrdenadas.length > 0
-      ? (txsOpenOrdenadas[0].strategies?.name || txsOpenOrdenadas[0].strategy || 'S/D')
+      ? (txsOpenOrdenadas[0].trade?.strategies?.name || txsOpenOrdenadas[0].strategies?.name || txsOpenOrdenadas[0].strategy || 'S/D')
       : 'S/D';
 
-    const strategy_id = txsOpenOrdenadas.length > 0 ? txsOpenOrdenadas[0].strategy_id : null;
+    const strategy_id = txsOpenOrdenadas.length > 0 
+      ? (txsOpenOrdenadas[0].trade?.strategy_id ?? masterByKey?.strategy_id ?? null) 
+      : (masterByKey?.strategy_id ?? null);
 
     // Para el trade actual, buscar la primera compra cronológica de TODO el trade
     const txsDelTradeActual = trade_code && trade_code !== '-'
@@ -294,7 +335,7 @@ export const consolidarStrategiesStops = (
       (t.action && t.action.toLowerCase().includes('buy'))
     ) || txsOrdenadasFechas[0];
     
-    const entryPrice = primeraCompra ? (primeraCompra.stock_entry_price || 0) : 0;
+    const entryPrice = primeraCompra ? (primeraCompra.trade?.stock_entry_price || (primeraCompra.instrument === 'Stock' ? primeraCompra.price : 0) || 0) : 0;
 
     // Buscar cotización técnica en MK-TOS para este símbolo
     const symKey = (pos.symbol || '').trim().toUpperCase();

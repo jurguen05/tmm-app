@@ -13,6 +13,7 @@ export interface TradeTransactionGroup {
   strategy_id: number | null
   stock_entry_price: number | null
   status: 'Open' | 'Closed'
+  current_quantity?: number | null
   first_buy_date: string | null
   latest_date: string
   net_cash_flow: number
@@ -213,7 +214,11 @@ export default function TransactionsTable({
 
                           {/* Status */}
                           <span
-                            className="inline-block px-2.5 py-0.5 rounded text-xs font-bold border border-slate-300 bg-transparent text-black"
+                            className={`inline-block px-3 py-0.5 rounded-full text-xs font-bold border ${
+                              group.status === 'Open'
+                                ? 'bg-green-100 text-green-800 border-green-300'
+                                : 'bg-gray-200 text-gray-700 border-gray-300'
+                            }`}
                           >
                             {group.status}
                           </span>

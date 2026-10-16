@@ -1,17 +1,13 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
 import PaginationControls from './PaginationControls'
-import { ConsolidatedStrategyStop, Trade } from '../types'
-import { updateTradeField, updateTransactionsByTradeCode, closeTradeWithExitMetrics } from '../services/queries'
-import { supabase } from '../lib/supabase'
+import { ConsolidatedStrategyStop } from '../types'
 import { formatearFecha } from '../lib/formatters'
 
 interface TableProps {
   datos: ConsolidatedStrategyStop[];
   cargando: boolean;
-  missingTrades?: Trade[];
 }
 
 // Formateador de moneda (Argentina)
@@ -33,41 +29,11 @@ const formatoPorcentaje = (valor: number) => {
   }).format(valor);
 };
 
-export default function StrategiesStopsTable({ datos, cargando, missingTrades }: TableProps) {
-  const router = useRouter()
-  const [missingList, setMissingList] = useState<Trade[]>(missingTrades || [])
+export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
   const [filtros, setFiltros] = useState({ trade_code: '', symbol: '', strategy: '', stopAlert: '' })
   const [paginaActual, setPaginaActual] = useState(1)
   const [elementosPorPagina, setElementosPorPagina] = useState(25)
   const [showRulesModal, setShowRulesModal] = useState(false)
-
-  // Sincronizar missingList si cambian las props
-  const [prevMissing, setPrevMissing] = useState(missingTrades)
-  if (prevMissing !== missingTrades) {
-    setPrevMissing(missingTrades)
-    setMissingList(missingTrades || [])
-  }
-
-  const handleCloseMissingTrade = async (tradeCode: number) => {
-    if (!confirm(`Are you sure you want to mark trade #${tradeCode} as Closed?`)) return
-    try {
-      const match = datos.find(d => Number(d.trade_code) === tradeCode);
-      const exitStop = match && typeof match.stop === 'number' ? match.stop : null;
-      const exitPrice = match?.lastPrice || null;
-      const exitSignal = match?.signal ?? null;
-
-      await closeTradeWithExitMetrics(supabase, tradeCode, {
-        exit_stop: exitStop,
-        exit_price: exitPrice,
-        exit_signal: exitSignal,
-        closed_date: new Date().toISOString().substring(0, 10)
-      });
-      setMissingList(prev => prev.filter(t => t.trade_code !== tradeCode))
-      router.refresh()
-    } catch (err: any) {
-      alert('Error updating trade: ' + err.message)
-    }
-  }
 
   // Extraer lista de estrategias únicas existentes en los datos
   const uniqueStrategies = useMemo(() => {
@@ -120,43 +86,6 @@ export default function StrategiesStopsTable({ datos, cargando, missingTrades }:
 
   return (
     <div className="space-y-4">
-      {/* Aviso de Review por Ausencia en Position Statement (Opción 2) */}
-      {missingList.length > 0 && (
-        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-r-lg shadow-sm border border-amber-200">
-          <div className="flex items-start gap-3">
-            <span className="text-xl">⚠️</span>
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-amber-900">
-                  Position Review ({missingList.length} open {missingList.length === 1 ? 'trade' : 'trades'} not in today's Position Statement)
-                </h3>
-              </div>
-              <p className="text-xs text-amber-700 mt-1">
-                The following trade(s) are recorded as <strong>Open</strong> in trade history, but do not appear in the latest Position Statement. They might have been closed, or affected by a corporate action (merger, acquisition, spin-off, ticker change):
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {missingList.map((tr) => (
-                  <div key={tr.id} className="bg-white border border-amber-300 rounded-md px-3 py-1.5 text-xs flex items-center gap-3 shadow-xs">
-                    <div>
-                      <span className="font-bold text-gray-900">{tr.symbol}</span>
-                      <span className="text-gray-500 ml-1.5">(Code: {tr.trade_code})</span>
-                      <span className="text-indigo-600 ml-2 font-medium">{tr.strategies?.name || 'S/D'}</span>
-                    </div>
-                    <button
-                      onClick={() => handleCloseMissingTrade(tr.trade_code)}
-                      className="px-2.5 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded font-semibold border border-amber-300 cursor-pointer transition-colors text-xs"
-                      title="Click to confirm and mark this trade as Closed"
-                    >
-                      Mark as Closed
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {(!datos || datos.length === 0) ? (
         <div className="bg-white p-8 rounded-lg shadow border border-gray-200 text-center text-gray-500">
           No active positions to analyze.

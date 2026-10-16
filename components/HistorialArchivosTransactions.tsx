@@ -53,6 +53,7 @@ export default function HistorialArchivosTransactions() {
           window.dispatchEvent(new CustomEvent('transactions-changed'))
         }
         if (result.tradeCodes && result.tradeCodes.length > 0) {
+          console.log('%c[HistorialArchivosTransactions] Opening Step 2 modal with trade codes:', 'color: #0d9488; font-weight: bold;', result.tradeCodes)
           setReviewTradeCodes(result.tradeCodes)
           setReviewModalOpen(true)
         }

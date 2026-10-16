@@ -10,6 +10,7 @@ import {
   getFilteredTransactions
 } from '../services/queries'
 import { Transaction, Strategy } from '../types'
+import { calcularCurrentQuantityDesdeTransacciones } from '../lib/transactionsParser'
 import TransactionsTable, { TradeTransactionGroup } from './TransactionsTable'
 import PaginationControls from './PaginationControls'
 
@@ -100,16 +101,18 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
         (t.unique_key && t.unique_key.toLowerCase().includes(searchSym))
 
       const strategyName =
+        t.trade?.strategies?.name ||
         t.strategies?.name ||
         t.strategy ||
-        (t.strategy_id ? estrategias.find((e) => e.id === t.strategy_id)?.name : '') ||
+        (t.trade?.strategy_id ? estrategias.find((e) => e.id === t.trade?.strategy_id)?.name : '') ||
         ''
       const matchStrategy =
         filtros.strategy === '' || strategyName.toLowerCase() === filtros.strategy.toLowerCase()
 
+      const effectiveStatus = t.trade?.status || 'Open'
       const matchStatus =
         filtros.status === '' ||
-        (t.position_status && t.position_status.toLowerCase() === filtros.status.toLowerCase())
+        effectiveStatus.toLowerCase() === filtros.status.toLowerCase()
       return matchCodigo && matchSymbol && matchStrategy && matchStatus
     })
   }, [transacciones, filtros, estrategias])
@@ -132,9 +135,12 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
           symbol: masterTrade?.symbol || tx.symbol || 'UNKNOWN',
           unique_key: masterTrade?.unique_key || tx.unique_key || tx.symbol || 'UNKNOWN',
           instrument: (masterTrade?.instrument || tx.instrument || 'Stock') as 'Stock' | 'Option',
-          strategy_id: masterTrade?.strategy_id ?? tx.strategy_id ?? null,
-          stock_entry_price: masterTrade?.stock_entry_price ?? tx.stock_entry_price ?? null,
-          status: (masterTrade?.status || tx.position_status || 'Open') as 'Open' | 'Closed',
+          strategy_id: masterTrade?.strategy_id ?? null,
+          stock_entry_price: masterTrade?.stock_entry_price ?? null,
+          status: (masterTrade?.status || 'Open') as 'Open' | 'Closed',
+          current_quantity: masterTrade?.current_quantity !== undefined && masterTrade?.current_quantity !== null
+            ? Number(masterTrade.current_quantity)
+            : undefined,
           first_buy_date: masterTrade?.first_buy_date || tx.date || null,
           latest_date: tx.date,
           net_cash_flow: Number(tx.amount) || 0,
@@ -156,6 +162,9 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
     // Ordenar transacciones internas cronológicamente (más reciente arriba o orden de ejecución)
     const groups = Array.from(map.values())
     for (const g of groups) {
+      if (g.current_quantity === undefined || g.current_quantity === null) {
+        g.current_quantity = calcularCurrentQuantityDesdeTransacciones(g.transactions)
+      }
       g.transactions.sort((a, b) => {
         if (a.date !== b.date) return b.date.localeCompare(a.date)
         return (b.created_at || '').localeCompare(a.created_at || '')

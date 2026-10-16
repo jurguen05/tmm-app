@@ -1,7 +1,7 @@
 // services/queries.ts
 
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem } from '../types';
-import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
+import { calcularEstadoTradeDesdeTransacciones, calcularCurrentQuantityDesdeTransacciones, calcularDeltaQuantity } from '../lib/transactionsParser';
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia, normalizeUniqueKey } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
@@ -27,7 +27,7 @@ export async function getUserProfile(supabase: SupabaseClient, userId: string): 
 export async function getTransactions(supabase: SupabaseClient, limit = 50): Promise<Transaction[]> {
   const { data: txsData, error: txError } = await supabase
     .from('transactions')
-    .select('*, strategies(name)')
+    .select('*')
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -49,7 +49,7 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
   if (limit <= 200) {
     const { data: siblingTxs } = await supabase
       .from('transactions')
-      .select('*, strategies(name)')
+      .select('*')
       .in('trade_code', uniqueCodes)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
@@ -77,33 +77,6 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
     }
   }
 
-  // Agrupar transacciones completas por trade_code y verificar estado neto
-  const txsByCode = new Map<number, Transaction[]>();
-  for (const t of allTxs) {
-    const c = t.trade_code ? Number(t.trade_code) : null;
-    if (c && !isNaN(c) && c > 0) {
-      if (!txsByCode.has(c)) txsByCode.set(c, []);
-      txsByCode.get(c)!.push(t);
-    }
-  }
-
-  const desyncedCodesToSync: number[] = [];
-  for (const [codeNum, codeTxs] of txsByCode.entries()) {
-    const tr = tradesMap.get(codeNum);
-    if (tr) {
-      const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
-      if (tr.status !== realStatus) {
-        tr.status = realStatus;
-        desyncedCodesToSync.push(codeNum);
-      }
-    }
-  }
-
-  if (desyncedCodesToSync.length > 0) {
-    syncTradesForCodes(supabase, desyncedCodesToSync).catch(err => {
-      console.warn('[getTransactions] Auto-sync error:', err.message);
-    });
-  }
 
   return allTxs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
@@ -114,18 +87,12 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
         symbol: t.symbol || tr.symbol,
         unique_key: t.unique_key || tr.unique_key,
         instrument: (t.instrument || tr.instrument || 'Stock') as 'Stock' | 'Option',
-        strategy_id: tr.strategy_id ?? t.strategy_id,
-        strategies: tr.strategies || (tr.strategy_id ? t.strategies : t.strategies),
-        strategy: tr.strategies?.name || t.strategy,
-        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
-        stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
+        strategies: tr.strategies || null,
+        strategy: tr.strategies?.name || null,
         trade: tr
       };
     }
-    return {
-      ...t,
-      position_status: 'Open' as 'Open' | 'Closed'
-    };
+    return t;
   });
 }
 
@@ -137,7 +104,7 @@ export async function getFilteredTransactions(
 ): Promise<Transaction[]> {
   let query = supabase
     .from('transactions')
-    .select('*, strategies(name)')
+    .select('*')
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -171,9 +138,9 @@ export async function getFilteredTransactions(
       .ilike('status', statusVal);
     const stCodes = ((stTrades as any[]) || []).map((t: any) => t.trade_code).filter((c: any): c is number => c !== null && c !== undefined);
     if (stCodes.length > 0) {
-      query = query.or(`position_status.ilike.${statusVal},trade_code.in.(${stCodes.join(',')})`);
+      query = query.in('trade_code', stCodes);
     } else {
-      query = query.ilike('position_status', statusVal);
+      query = query.in('trade_code', [-999999]);
     }
   }
 
@@ -192,9 +159,9 @@ export async function getFilteredTransactions(
         .eq('strategy_id', stratData.id);
       const codes = ((stratTrades as any[]) || []).map((t: any) => t.trade_code).filter((c: any): c is number => c !== null && c !== undefined);
       if (codes.length > 0) {
-        query = query.or(`strategy_id.eq.${stratData.id},trade_code.in.(${codes.join(',')})`);
+        query = query.in('trade_code', codes);
       } else {
-        query = query.eq('strategy_id', stratData.id);
+        query = query.in('trade_code', [-999999]);
       }
     }
   }
@@ -215,7 +182,7 @@ export async function getFilteredTransactions(
   if (uniqueCodes.length > 0) {
     const { data: siblingTxs } = await supabase
       .from('transactions')
-      .select('*, strategies(name)')
+      .select('*')
       .in('trade_code', uniqueCodes)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
@@ -242,33 +209,6 @@ export async function getFilteredTransactions(
     }
   }
 
-  // Agrupar transacciones por trade_code y verificar estado neto para todos los códigos visibles
-  const txsByCode = new Map<number, Transaction[]>();
-  for (const t of allTxs) {
-    const c = t.trade_code ? Number(t.trade_code) : null;
-    if (c && !isNaN(c) && c > 0) {
-      if (!txsByCode.has(c)) txsByCode.set(c, []);
-      txsByCode.get(c)!.push(t);
-    }
-  }
-
-  const desyncedCodesToSync: number[] = [];
-  for (const [codeNum, codeTxs] of txsByCode.entries()) {
-    const tr = tradesMap.get(codeNum);
-    if (tr) {
-      const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
-      if (tr.status !== realStatus) {
-        tr.status = realStatus;
-        desyncedCodesToSync.push(codeNum);
-      }
-    }
-  }
-
-  if (desyncedCodesToSync.length > 0) {
-    syncTradesForCodes(supabase, desyncedCodesToSync).catch(err => {
-      console.warn('[getFilteredTransactions] Auto-sync error:', err.message);
-    });
-  }
 
   let enriched: Transaction[] = allTxs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
@@ -279,18 +219,12 @@ export async function getFilteredTransactions(
         symbol: t.symbol || tr.symbol,
         unique_key: t.unique_key || tr.unique_key,
         instrument: (t.instrument || tr.instrument || 'Stock') as 'Stock' | 'Option',
-        strategy_id: tr.strategy_id ?? t.strategy_id,
-        strategies: tr.strategies || t.strategies,
-        strategy: tr.strategies?.name || t.strategy,
-        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
-        stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
+        strategies: tr.strategies || null,
+        strategy: tr.strategies?.name || null,
         trade: tr
       };
     }
-    return {
-      ...t,
-      position_status: 'Open' as 'Open' | 'Closed'
-    };
+    return t;
   });
 
   if (filters.strategy && filters.strategy.trim() && filters.strategy.toLowerCase() !== 'all') {
@@ -304,17 +238,32 @@ export async function getFilteredTransactions(
 export async function getTransactionsByUniqueKeys(supabase: SupabaseClient, uniqueKeys: string[]): Promise<Transaction[]> {
   if (!uniqueKeys || uniqueKeys.length === 0) return [];
 
-  // 1. Buscar en la tabla maestra 'trades' los trade_codes que corresponden a esos unique_keys
-  const { data: tradesData } = await supabase
-    .from('trades')
-    .select('*, strategies(name)')
-    .in('unique_key', uniqueKeys);
+  // 1. Buscar en la tabla maestra 'trades' los trade_codes que corresponden a esos unique_keys o símbolos abiertos
+  const symbols = Array.from(new Set(uniqueKeys.map(k => {
+    const dash = k.indexOf('-');
+    return dash !== -1 ? k.substring(0, dash).trim() : k.trim();
+  }).filter(Boolean)));
+
+  const [{ data: tradesData }, { data: openTradesBySym }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*, strategies(name)')
+      .in('unique_key', uniqueKeys),
+    symbols.length > 0
+      ? supabase
+          .from('trades')
+          .select('*, strategies(name)')
+          .in('symbol', symbols)
+          .eq('status', 'Open')
+      : Promise.resolve({ data: [] } as any)
+  ]);
 
   const tradesMap = new Map<number, any>();
   const tradeCodes: number[] = [];
-  for (const tr of tradesData || []) {
+  const allMasterTrades = [...(tradesData || []), ...(openTradesBySym || [])];
+  for (const tr of allMasterTrades) {
     const c = Number(tr.trade_code);
-    if (!isNaN(c) && c > 0) {
+    if (!isNaN(c) && c > 0 && !tradesMap.has(c)) {
       tradesMap.set(c, tr);
       tradeCodes.push(c);
     }
@@ -324,14 +273,14 @@ export async function getTransactionsByUniqueKeys(supabase: SupabaseClient, uniq
   const queries: Promise<any>[] = [
     supabase
       .from('transactions')
-      .select('*, strategies(name)')
+      .select('*')
       .in('unique_key', uniqueKeys)
   ];
   if (tradeCodes.length > 0) {
     queries.push(
       supabase
         .from('transactions')
-        .select('*, strategies(name)')
+        .select('*')
         .in('trade_code', tradeCodes)
     );
   }
@@ -348,11 +297,8 @@ export async function getTransactionsByUniqueKeys(supabase: SupabaseClient, uniq
         symbol: tr.symbol || t.symbol,
         unique_key: tr.unique_key || t.unique_key,
         instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
-        strategy_id: tr.strategy_id ?? t.strategy_id,
-        strategies: tr.strategies || t.strategies,
-        strategy: tr.strategies?.name || t.strategy,
-        position_status: (tr.status === 'Closed' ? 'Closed' : 'Open') as 'Open' | 'Closed',
-        stock_entry_price: tr.stock_entry_price ?? t.stock_entry_price,
+        strategies: tr.strategies || null,
+        strategy: tr.strategies?.name || null,
         trade: tr
       } : t);
     }
@@ -414,9 +360,9 @@ export async function deleteTransactionsByFileUploadId(supabase: SupabaseClient,
 export async function insertTransactions(supabase: SupabaseClient, rows: any[]): Promise<void> {
   if (!rows || rows.length === 0) return;
   
-  // Limpiar payload para evitar campos virtuales/UI que no existen en el esquema de la base de datos
+  // Limpiar payload para evitar campos virtuales/UI o removidos que no existen en el esquema de la base de datos
   const cleanRows = rows.map(r => {
-    const { strategy, trade, strategies, codigo, ...dbRow } = r;
+    const { strategy, trade, strategies, codigo, position_status, strategy_id, stock_entry_price, _isExistingDuplicate, _origIdx, ...dbRow } = r;
     return dbRow;
   });
 
@@ -782,7 +728,7 @@ export async function getTransactionsByTradeCodes(
 
   const { data, error } = await supabase
     .from('transactions')
-    .select('*, strategies(name)')
+    .select('*')
     .in('trade_code', validCodes)
     .order('date', { ascending: true });
 
@@ -1112,9 +1058,9 @@ export async function resolveAndAssignTradesForTransactions(
   supabase: SupabaseClient,
   rows: any[],
   defaultAccountId?: string
-): Promise<{ rowsWithCodes: any[]; tradeCodes: number[] }> {
+): Promise<{ rowsWithCodes: any[]; tradeCodes: number[]; newTradeCodes: number[] }> {
   if (!rows || rows.length === 0) {
-    return { rowsWithCodes: [], tradeCodes: [] };
+    return { rowsWithCodes: [], tradeCodes: [], newTradeCodes: [] };
   }
 
   // 1. Obtener el máximo trade_code actual entre trades y transactions
@@ -1138,8 +1084,9 @@ export async function resolveAndAssignTradesForTransactions(
   const maxInTxs = maxTxRow?.trade_code ? Number(maxTxRow.trade_code) : 1;
   let nextTradeCode = Math.max(isNaN(maxInTrades) ? 1 : maxInTrades, isNaN(maxInTxs) ? 1 : maxInTxs, 1) + 1;
 
-  // 2. Obtener trades actualmente 'Open' en la tabla maestra 'trades' para los unique_key del lote
+  // 2. Extraer claves y símbolos de las transacciones entrantes
   const rawKeys = Array.from(new Set(rows.map(r => r.unique_key || r.symbol).filter(Boolean)));
+  const rawSymbols = Array.from(new Set(rows.map(r => (r.symbol || '').trim().toUpperCase()).filter(Boolean)));
   const keysToQuery = new Set<string>();
   for (const k of rawKeys) {
     keysToQuery.add(k);
@@ -1156,21 +1103,86 @@ export async function resolveAndAssignTradesForTransactions(
     }
   }
   const uniqueKeys = Array.from(keysToQuery);
-  const { data: openTradesData } = uniqueKeys.length > 0
-    ? await supabase
-        .from('trades')
-        .select('*')
-        .eq('status', 'Open')
-        .in('unique_key', uniqueKeys)
-    : { data: [] };
 
-  const openTradesList: any[] = openTradesData || [];
+  // 3. Consultar en paralelo: trades abiertos, transacciones existentes en DB (para deduplicación y rescate de abiertos)
+  const [{ data: openTradesByKey }, { data: openTradesBySymbol }, { data: existingDbTxs }] = await Promise.all([
+    uniqueKeys.length > 0
+      ? supabase.from('trades').select('*').ilike('status', 'Open').in('unique_key', uniqueKeys)
+      : Promise.resolve({ data: [] }),
+    rawSymbols.length > 0
+      ? supabase.from('trades').select('*').ilike('status', 'Open').in('symbol', rawSymbols)
+      : Promise.resolve({ data: [] }),
+    rawSymbols.length > 0
+      ? supabase
+          .from('transactions')
+          .select('id, trade_code, date, symbol, unique_key, action, quantity, price, amount, account_id')
+          .in('symbol', rawSymbols)
+          .order('date', { ascending: false })
+      : Promise.resolve({ data: [] })
+  ]);
+
+  // 4. DETECCIÓN Y DEDUPLICACIÓN DE TRANSACCIONES YA REGISTRADAS EN LA BD (Overlap de exportación ThinkorSwim)
+  const matchedDbTxIds = new Set<string>();
+  const dbTxsList: any[] = existingDbTxs || [];
+
+  const clonedRows = rows.map((r, idx) => {
+    let duplicateMatch: any = null;
+
+    for (const dbt of dbTxsList) {
+      if (matchedDbTxIds.has(dbt.id)) continue;
+
+      const sameSymbol = (dbt.symbol || '').trim().toUpperCase() === (r.symbol || '').trim().toUpperCase();
+      if (!sameSymbol) continue;
+
+      const sameDate = String(dbt.date || '').split('T')[0] === String(r.date || '').split('T')[0];
+      if (!sameDate) continue;
+
+      const actDb = (dbt.action || '').trim().toLowerCase();
+      const actRow = (r.action || '').trim().toLowerCase();
+      const sameAction = actDb === actRow || 
+        (actDb.includes('buy') && actRow.includes('buy')) ||
+        (actDb.includes('sell') && actRow.includes('sell'));
+      if (!sameAction) continue;
+
+      const sameQty = Math.abs((Number(dbt.quantity) || 0) - (Number(r.quantity) || 0)) < 0.0001;
+      const samePrice = Math.abs((Number(dbt.price) || 0) - (Number(r.price) || 0)) < 0.0001;
+      const sameAmount = Math.abs((Number(dbt.amount) || 0) - (Number(r.amount) || 0)) < 0.02;
+
+      if (sameQty && samePrice && sameAmount) {
+        duplicateMatch = dbt;
+        matchedDbTxIds.add(dbt.id);
+        break;
+      }
+    }
+
+    if (duplicateMatch) {
+      return {
+        ...r,
+        _origIdx: idx,
+        _isExistingDuplicate: true,
+        trade_code: r.trade_code || duplicateMatch.trade_code || null
+      };
+    }
+
+    return { ...r, _origIdx: idx, _isExistingDuplicate: false };
+  });
+
+  // 5. Construir mapa de trades abiertos EXCLUSIVAMENTE desde la tabla maestra 'trades'
+  const combinedOpenTradesMap = new Map<number, any>();
+  for (const tr of [...(openTradesByKey || []), ...(openTradesBySymbol || [])]) {
+    const code = Number(tr.trade_code);
+    if (!isNaN(code) && code > 0) {
+      combinedOpenTradesMap.set(code, tr);
+    }
+  }
+
+  const openTradesList: any[] = Array.from(combinedOpenTradesMap.values());
   const openTradeCodes = openTradesList
     .map(t => Number(t.trade_code))
     .filter(c => !isNaN(c) && c > 0);
   const existingDbCodes = new Set<number>(openTradeCodes);
 
-  // 3. Obtener transacciones previas de esos trades abiertos para llevar el balance neto acumulado exacto
+  // 6. Obtener transacciones previas de esos trades abiertos para balance neto acumulado exacto
   const { data: existingOpenTxs } = openTradeCodes.length > 0
     ? await supabase
         .from('transactions')
@@ -1186,6 +1198,7 @@ export async function resolveAndAssignTradesForTransactions(
 
   const stateByCode = new Map<number, ActiveTradeState>();
   const activeOpenByKey = new Map<string, ActiveTradeState>();
+  const activeOpenBySymbol = new Map<string, ActiveTradeState[]>();
 
   for (const tr of openTradesList) {
     const code = Number(tr.trade_code);
@@ -1200,6 +1213,13 @@ export async function resolveAndAssignTradesForTransactions(
     if (tr.unique_key) {
       activeOpenByKey.set(normalizeUniqueKey(tr.unique_key), state);
     }
+    if (tr.symbol) {
+      const sym = tr.symbol.trim().toUpperCase();
+      if (!activeOpenBySymbol.has(sym)) {
+        activeOpenBySymbol.set(sym, []);
+      }
+      activeOpenBySymbol.get(sym)!.push(state);
+    }
   }
 
   for (const t of existingOpenTxs || []) {
@@ -1210,21 +1230,7 @@ export async function resolveAndAssignTradesForTransactions(
     const rawQty = Number(t.quantity) || 0;
     const absQty = Math.abs(rawQty);
     const isExp = act.includes('exp');
-    const isSell =
-      act.includes('sell') ||
-      act.includes('sold') ||
-      isExp ||
-      rawQty < 0 ||
-      (t.amount !== null && t.amount !== undefined && t.amount > 0);
-    const isBuy =
-      !isSell &&
-      (act.includes('buy') ||
-        act.includes('bot') ||
-        act.includes('bought') ||
-        (t.amount !== null && t.amount !== undefined && t.amount < 0) ||
-        rawQty > 0);
-
-    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
+    const delta = calcularDeltaQuantity(t.action, rawQty);
     state.hasTransactions = true;
     if (isExp) {
       state.netQty = absQty === 0 ? 0 : Math.max(0, state.netQty + delta);
@@ -1233,8 +1239,7 @@ export async function resolveAndAssignTradesForTransactions(
     }
   }
 
-  // 4. Ordenar las filas entrantes cronológicamente (compras antes que ventas en el mismo día)
-  const clonedRows = rows.map((r, idx) => ({ ...r, _origIdx: idx }));
+  // 7. Ordenar las filas entrantes cronológicamente (compras antes que ventas en el mismo día)
   clonedRows.sort((a, b) => {
     const dateCmp = String(a.date || '').localeCompare(String(b.date || ''));
     if (dateCmp !== 0) return dateCmp;
@@ -1249,29 +1254,25 @@ export async function resolveAndAssignTradesForTransactions(
   const tradesToUpsertMap = new Map<number, Partial<Trade>>();
   const existingCodesToClose = new Set<number>();
   const assignedTradeCodes = new Set<number>();
+  const newTradeCodes = new Set<number>();
 
   for (const row of clonedRows) {
+    if (row._isExistingDuplicate) {
+      if (row.trade_code && !isNaN(Number(row.trade_code))) {
+        assignedTradeCodes.add(Number(row.trade_code));
+      }
+      continue;
+    }
+
     const uKey = row.unique_key || row.symbol || 'UNKNOWN';
     const normUKey = normalizeUniqueKey(uKey);
     const act = (row.action || '').trim().toLowerCase();
     const rawQty = Number(row.quantity) || 0;
     const absQty = Math.abs(rawQty);
     const isExp = act.includes('exp');
-    const isSell =
-      act.includes('sell') ||
-      act.includes('sold') ||
-      isExp ||
-      rawQty < 0 ||
-      (row.amount !== null && row.amount !== undefined && row.amount > 0);
-    const isBuy =
-      !isSell &&
-      (act.includes('buy') ||
-        act.includes('bot') ||
-        act.includes('bought') ||
-        (row.amount !== null && row.amount !== undefined && row.amount < 0) ||
-        rawQty > 0);
-
-    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
+    const delta = calcularDeltaQuantity(row.action, rawQty);
+    const isSell = delta < 0;
+    const isBuy = delta > 0;
 
     let code = row.trade_code && !isNaN(Number(row.trade_code)) && Number(row.trade_code) > 0
       ? Number(row.trade_code)
@@ -1280,7 +1281,7 @@ export async function resolveAndAssignTradesForTransactions(
     let activeState: ActiveTradeState | undefined;
 
     if (code !== null) {
-      if ( code >= nextTradeCode ) {
+      if (code >= nextTradeCode) {
         nextTradeCode = code + 1;
       }
       activeState = stateByCode.get(code);
@@ -1307,16 +1308,36 @@ export async function resolveAndAssignTradesForTransactions(
         tradesToUpsertMap.set(code, newTrade);
       }
     } else {
-      // Buscar trade maestro 'Open' para este unique_key
-      activeState = activeOpenByKey.get(normUKey);
+      // 1. Buscar trade maestro 'Open' para este unique_key exacto o normalizado
+      activeState = activeOpenByKey.get(normUKey) || activeOpenByKey.get(normalizeUniqueKey(uKey));
+
+      // 2. Si no coincide por unique_key, buscar por symbol entre los trades 'Open'
+      if (!activeState && row.symbol) {
+        const symUpper = row.symbol.trim().toUpperCase();
+        const candidateStates = activeOpenBySymbol.get(symUpper) || [];
+        if (candidateStates.length === 1) {
+          activeState = candidateStates[0];
+        } else if (candidateStates.length > 1) {
+          const rowInst = (row.instrument || 'Stock').toLowerCase();
+          const withSameInst = candidateStates.find(s => (s.trade.instrument || 'Stock').toLowerCase() === rowInst);
+          if (withSameInst) {
+            activeState = withSameInst;
+          } else if (isSell) {
+            const withPositiveQty = candidateStates.find(s => s.netQty > 0);
+            activeState = withPositiveQty || candidateStates[0];
+          } else {
+            activeState = candidateStates[0];
+          }
+        }
+      }
+
+
 
       if (activeState && activeState.trade.trade_code) {
         code = Number(activeState.trade.trade_code);
         row.trade_code = code;
-        row.strategy_id = row.strategy_id ?? activeState.trade.strategy_id ?? null;
-        row.stock_entry_price = row.stock_entry_price ?? activeState.trade.stock_entry_price ?? null;
       } else {
-        // No existe trade 'Open' para este unique_key -> generar nuevo trade_code en 'trades'
+        // No existe trade 'Open' para este unique_key ni para el símbolo -> generar nuevo trade_code en 'trades'
         code = nextTradeCode++;
         row.trade_code = code;
 
@@ -1325,10 +1346,10 @@ export async function resolveAndAssignTradesForTransactions(
           symbol: row.symbol || uKey,
           unique_key: uKey,
           instrument: (row.instrument || 'Stock') as 'Stock' | 'Option',
-          strategy_id: row.strategy_id ?? null,
-          stock_entry_price: row.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
+          strategy_id: null,
+          stock_entry_price: row.instrument === 'Stock' ? row.price : null,
           first_buy_date: row.date,
-          status: 'Open',
+          status: isSell ? 'Closed' : 'Open',
           weekend_trader_flag: false,
           account_id: row.account_id || defaultAccountId || null
         };
@@ -1340,7 +1361,19 @@ export async function resolveAndAssignTradesForTransactions(
         };
         stateByCode.set(code, activeState);
         activeOpenByKey.set(normUKey, activeState);
+        if (newTrade.symbol) {
+          const sym = newTrade.symbol.trim().toUpperCase();
+          if (!activeOpenBySymbol.has(sym)) {
+            activeOpenBySymbol.set(sym, []);
+          }
+          activeOpenBySymbol.get(sym)!.push(activeState);
+        }
         tradesToUpsertMap.set(code, newTrade);
+
+        // SOLO compras nuevas de trades nuevos se envían a revisión en Step 2 Modal
+        if (isBuy) {
+          newTradeCodes.add(code);
+        }
       }
     }
 
@@ -1355,11 +1388,24 @@ export async function resolveAndAssignTradesForTransactions(
     }
 
     const isTradeClosed = activeState.hasTransactions && Math.abs(activeState.netQty) <= 0.0001;
+    activeState.trade.current_quantity = isTradeClosed ? 0 : Math.max(0, Number(activeState.netQty.toFixed(4)));
 
     if (isTradeClosed) {
       activeState.trade.status = 'Closed';
-      row.position_status = 'Closed';
       activeOpenByKey.delete(normUKey);
+      if (activeState.trade.unique_key) {
+        activeOpenByKey.delete(normalizeUniqueKey(activeState.trade.unique_key));
+      }
+      if (activeState.trade.symbol) {
+        const sym = activeState.trade.symbol.trim().toUpperCase();
+        const list = activeOpenBySymbol.get(sym) || [];
+        const remaining = list.filter(s => s.trade.trade_code !== code);
+        if (remaining.length > 0) {
+          activeOpenBySymbol.set(sym, remaining);
+        } else {
+          activeOpenBySymbol.delete(sym);
+        }
+      }
       if (existingDbCodes.has(code)) {
         existingCodesToClose.add(code);
       } else {
@@ -1367,21 +1413,20 @@ export async function resolveAndAssignTradesForTransactions(
       }
     } else {
       activeState.trade.status = 'Open';
-      row.position_status = 'Open';
       if (existingDbCodes.has(code)) {
         existingCodesToClose.delete(code);
       }
     }
   }
 
-  // 5. Persistir primero los registros maestros nuevos en 'trades' y cerrar los existentes que correspondan
+  // 8. Persistir primero los registros maestros nuevos en 'trades' y cerrar los existentes que correspondan
   if (tradesToUpsertMap.size > 0) {
     await upsertTrades(supabase, Array.from(tradesToUpsertMap.values()));
   }
   if (existingCodesToClose.size > 0) {
     await supabase
       .from('trades')
-      .update({ status: 'Closed' })
+      .update({ status: 'Closed', current_quantity: 0 })
       .in('trade_code', Array.from(existingCodesToClose));
   }
 
@@ -1391,7 +1436,8 @@ export async function resolveAndAssignTradesForTransactions(
 
   return {
     rowsWithCodes,
-    tradeCodes: Array.from(assignedTradeCodes)
+    tradeCodes: Array.from(assignedTradeCodes),
+    newTradeCodes: Array.from(newTradeCodes)
   };
 }
 
@@ -1422,7 +1468,7 @@ export async function syncTradesForCodes(
     // 2. Obtener las transacciones vinculadas
     const { data: txs, error: errTxs } = await supabase
       .from('transactions')
-      .select('*, strategies(name)')
+      .select('*')
       .in('trade_code', uniqueCodes)
       .order('date', { ascending: true });
 
@@ -1489,16 +1535,16 @@ export async function syncTradesForCodes(
 
       const firstBuyDate = existing?.first_buy_date || primeraCompra?.date || codeTxs[0]?.date || null;
       const instrument = (existing?.instrument || primeraCompra?.instrument || codeTxs[0]?.instrument || 'Stock') as 'Stock' | 'Option';
-      const initialEntryPrice = existing?.stock_entry_price ?? primeraCompra?.stock_entry_price ?? (instrument === 'Stock' ? primeraCompra?.price : null);
+      const initialEntryPrice = existing?.stock_entry_price ?? (instrument === 'Stock' ? primeraCompra?.price : null);
       const symbol = existing?.symbol || codeTxs[0]?.symbol || '';
       const uniqueKey = existing?.unique_key || codeTxs[0]?.unique_key || symbol;
       const accountId = existing?.account_id || codeTxs[0]?.account_id || defaultAccountId || null;
 
-      const txConStrategy = codeTxs.find(t => t.strategy_id !== null && t.strategy_id !== undefined);
-      const strategyId = existing?.strategy_id ?? (txConStrategy?.strategy_id ?? null);
+      const strategyId = existing?.strategy_id ?? null;
 
-      // REGLA OPCIÓN 1: Calcular estado ('Open' o 'Closed') a partir del balance neto de cantidades
-      const calculatedStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
+      // REGLA: Calcular estado ('Open' o 'Closed') y cantidad neta actual (current_quantity)
+      const calculatedCurrentQty = calcularCurrentQuantityDesdeTransacciones(codeTxs);
+      const calculatedStatus = calculatedCurrentQty > 0.0001 ? 'Open' : 'Closed';
 
       const normDateStr = firstBuyDate ? (parsearFechaTOS(firstBuyDate) || firstBuyDate.substring(0, 10)) : null;
       const isWeekendTrade = Boolean(
@@ -1531,7 +1577,7 @@ export async function syncTradesForCodes(
         }
 
         const quote = quotesBySymbol.get(symbol.trim().toUpperCase()) || null;
-        const stratName = (existing?.strategies as any)?.name || (txConStrategy as any)?.strategies?.name || '';
+        const stratName = (existing?.strategies as any)?.name || '';
         calculatedExitMetrics = calculateStrategyExitMetrics(
           stratName,
           quote,
@@ -1567,6 +1613,7 @@ export async function syncTradesForCodes(
           stock_entry_price: initialEntryPrice,
           first_buy_date: firstBuyDate,
           status: calculatedStatus,
+          current_quantity: calculatedCurrentQty,
           weekend_trader_flag: calculatedStatus === 'Closed' ? false : initialWeekendFlag,
           max_stock_price: calculatedStatus === 'Closed' ? null : undefined,
           max_stock_price_date: calculatedStatus === 'Closed' ? null : undefined,
@@ -1582,6 +1629,7 @@ export async function syncTradesForCodes(
       } else {
         const updateObj: Record<string, any> = {
           status: calculatedStatus,
+          current_quantity: calculatedCurrentQty,
           symbol: existing.symbol || symbol,
           unique_key: existing.unique_key || uniqueKey,
           first_buy_date: existing.first_buy_date || firstBuyDate,
@@ -1616,27 +1664,11 @@ export async function syncTradesForCodes(
         if (errUp) {
           console.warn(`[syncTradesForCodes] Error updating trade ${code}:`, errUp.message);
         }
-
-        // Sincronizar position_status en transactions para mantener consistencia
-        await supabase
-          .from('transactions')
-          .update({ position_status: calculatedStatus })
-          .eq('trade_code', code)
-          .catch(() => {});
       }
     }
 
     if (tradesToUpsert.length > 0) {
       await upsertTrades(supabase, tradesToUpsert);
-      for (const t of tradesToUpsert) {
-        if (t.trade_code && t.status) {
-          await supabase
-            .from('transactions')
-            .update({ position_status: t.status })
-            .eq('trade_code', t.trade_code)
-            .catch(() => {});
-        }
-      }
     }
   } catch (error: any) {
     console.warn('[syncTradesForCodes] Error en sincronización:', error.message);
@@ -2022,7 +2054,7 @@ export async function getAllTransactions(supabase: SupabaseClient): Promise<Tran
     const to = from + pageSize - 1;
     const { data, error } = await supabase
       .from('transactions')
-      .select('*, strategies(name)')
+      .select('*')
       .order('date', { ascending: true })
       .range(from, to);
 
@@ -2191,7 +2223,7 @@ export async function getTradesForEnrichment(
     .from('trades')
     .select('*')
     .in('trade_code', uniqueCodes)
-    .eq('status', 'Open');
+    .ilike('status', 'Open');
 
   if (errTrades || !trades || trades.length === 0) return [];
 
@@ -2212,7 +2244,7 @@ export async function getTradesForEnrichment(
   const pendingCodes = pendingTrades.map((t: any) => Number(t.trade_code));
   const { data: txs } = await supabase
     .from('transactions')
-    .select('trade_code, symbol, instrument, price, amount, action, stock_entry_price, date')
+    .select('trade_code, symbol, instrument, price, amount, action, date')
     .in('trade_code', pendingCodes)
     .order('date', { ascending: true });
 

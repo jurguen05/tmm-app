@@ -196,15 +196,17 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
 
     setGlobalLoading(false)
 
-    if (algunExito) {
-      router.refresh()
-    }
-
     // Si se subieron transacciones con éxito y sin error, verificar si hay trades para enriquecer
     if (algunExito && !huboError && insertedTradeCodes.length > 0) {
+      console.log('%c[QuickUploadModal] Switching step to "enrich" with trade codes:', 'color: #8b5cf6; font-weight: bold;', insertedTradeCodes)
       setEnrichTradeCodes(insertedTradeCodes)
       setStep('enrich')
       return
+    }
+
+    if (algunExito) {
+      console.log('%c[QuickUploadModal] router.refresh() triggered after upload (no enrichment needed)', 'color: #8b5cf6; font-weight: bold;')
+      router.refresh()
     }
 
     // Si todo se procesó con éxito y sin errores ni necesidad de enriquecimiento, cerrar automáticamente en 1 segundo
@@ -254,6 +256,10 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
   }
 
   if (step === 'enrich') {
+    console.log('%c[QuickUploadModal] Rendering Step 2 modal (ReviewNewTradesModal)', 'color: #8b5cf6; font-weight: bold;', {
+      enrichTradeCodes,
+      time: new Date().toISOString()
+    })
     return (
       <ReviewNewTradesModal
         isOpen={true}

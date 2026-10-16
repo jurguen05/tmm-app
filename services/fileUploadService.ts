@@ -243,27 +243,21 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
 
           // 3. Resolver/generar trade_code primero en la tabla maestra 'trades' usando unique_key
           const filasConArchivo = filasProcesadas.map(f => ({ ...f, file_upload_id: fileRecord.id }));
-          const { rowsWithCodes, tradeCodes: resolvedCodes } = await resolveAndAssignTradesForTransactions(
+          const { rowsWithCodes, tradeCodes: resolvedCodes, newTradeCodes } = await resolveAndAssignTradesForTransactions(
             supabase,
             filasConArchivo,
             accountId
           );
 
-          // 4. Insertar transacciones haciendo referencia al trade_code de 'trades'
-          await insertTransactions(supabase, rowsWithCodes);
+          // 4. Insertar transacciones que NO sean duplicados ya existentes en la BD
+          const rowsToInsert = rowsWithCodes.filter((r: any) => !r._isExistingDuplicate);
+          if (rowsToInsert.length > 0) {
+            await insertTransactions(supabase, rowsToInsert);
+          }
 
           // 5. Consolidar estado y métricas finales en la tabla maestra 'trades'
-          const { data: insertedTxs } = await supabase
-            .from('transactions')
-            .select('trade_code')
-            .eq('file_upload_id', fileRecord.id)
-            .limit(100000);
-
           const tradeCodes: number[] = Array.from(new Set<number>([
-            ...resolvedCodes,
-            ...(insertedTxs || [])
-              .map((t: any) => Number(t.trade_code))
-              .filter((c: any): c is number => !isNaN(c) && c > 0)
+            ...resolvedCodes
           ]));
 
           // Sincronizar trades (actualiza métricas y cierres de los códigos afectados)
@@ -271,31 +265,38 @@ export async function processTransactionsUpload(file: File, supabase: any): Prom
           if (tradeCodes.length > 0) {
             await syncTradesForCodes(supabase, tradeCodes, accountId);
 
-            // Identificar directamente en 'trades' cuáles están ABIERTOS y necesitan enriquecimiento
-            // (no tienen estrategia o no tienen precio de entrada del subyacente)
-            const { data: tradesInDb } = await supabase
-              .from('trades')
-              .select('trade_code, strategy_id, stock_entry_price, status')
-              .in('trade_code', tradeCodes)
-              .eq('status', 'Open');
+            // Step 2 Modal: EXCLUSIVAMENTE para COMPRAS NUEVAS generadas en este archivo
+            // que están abiertas y requieren que el usuario asigne estrategia o precio de entrada
+            if (newTradeCodes && newTradeCodes.length > 0) {
+              const { data: tradesInDb } = await supabase
+                .from('trades')
+                .select('trade_code, strategy_id, stock_entry_price, status')
+                .in('trade_code', newTradeCodes)
+                .ilike('status', 'Open');
 
-            pendingTradeCodes = (tradesInDb || [])
-              .filter((tr: any) => 
-                tr.strategy_id === null || 
-                tr.strategy_id === undefined || 
-                tr.stock_entry_price === null || 
-                tr.stock_entry_price === undefined ||
-                tr.stock_entry_price === 0
-              )
-              .map((tr: any) => Number(tr.trade_code));
+              pendingTradeCodes = (tradesInDb || [])
+                .filter((tr: any) => 
+                  tr.strategy_id === null || 
+                  tr.strategy_id === undefined || 
+                  tr.stock_entry_price === null || 
+                  tr.stock_entry_price === undefined ||
+                  tr.stock_entry_price === 0
+                )
+                .map((tr: any) => Number(tr.trade_code));
+            }
           }
+
+          const duplicatesCount = filasProcesadas.length - rowsToInsert.length;
+          const msg = duplicatesCount > 0
+            ? `Successfully processed ${rowsToInsert.length} new transactions (${duplicatesCount} duplicate records skipped).`
+            : `Successfully processed ${rowsToInsert.length} transactions.`;
 
           resolve({
             success: true,
             module: 'transactions',
             fileName: file.name,
-            count: filasProcesadas.length,
-            message: `Successfully processed ${filasProcesadas.length} transactions.`,
+            count: rowsToInsert.length,
+            message: msg,
             tradeCodes: pendingTradeCodes
           });
         } catch (err: any) {

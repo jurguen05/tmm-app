@@ -14,7 +14,6 @@ export interface FileUpload {
 export interface Transaction {
   id: string;
   date: string;
-  codigo?: number | null;
   trade_code?: number | null;
   action: string;
   symbol: string;
@@ -24,11 +23,8 @@ export interface Transaction {
   price: number;
   amount: number;
   fees?: number;
-  stock_entry_price: number | null;
   strategy?: string | null;
-  strategy_id?: number | null;
   strategies?: { name: string } | null;
-  position_status: 'Open' | 'Closed';
   created_at?: string;
   file_upload_id?: string;
   account_id?: string;
@@ -58,6 +54,7 @@ export interface Trade {
   cash_flow?: number | null;
   realized_pnl?: number | null;
   initial_investment?: number | null;
+  current_quantity?: number | null;
   account_id?: string | null;
   created_at?: string;
   updated_at?: string;

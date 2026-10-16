@@ -104,15 +104,15 @@ export const resolverEstrategiaDePosicion = (
   const txsConEstado = txs.map(t => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     const parentTrade = codeNum && tradesByCode.has(codeNum) ? tradesByCode.get(codeNum) : null;
-    const effectiveStatus = (parentTrade?.status || t.position_status || '').toLowerCase();
+    const effectiveStatus = (parentTrade?.status || t.trade?.status || '').toLowerCase();
     
     let effectiveStrategyName = '';
     if (parentTrade?.strategy_id && strategiesById.has(parentTrade.strategy_id)) {
       effectiveStrategyName = strategiesById.get(parentTrade.strategy_id)!.name;
     } else if (parentTrade?.strategies?.name) {
       effectiveStrategyName = parentTrade.strategies.name;
-    } else if (t.strategy_id && strategiesById.has(t.strategy_id)) {
-      effectiveStrategyName = strategiesById.get(t.strategy_id)!.name;
+    } else if (t.trade?.strategy_id && strategiesById.has(t.trade.strategy_id)) {
+      effectiveStrategyName = strategiesById.get(t.trade.strategy_id)!.name;
     } else if (t.strategies?.name) {
       effectiveStrategyName = t.strategies.name;
     } else if (t.strategy && t.strategy.trim() !== '') {
@@ -395,7 +395,10 @@ export const calcularPnLDiccionarios = (
       txFirstStrategyByTrade.set(tid, normalizarNombreEstrategia(rawStrat));
     }
     if (!txFirstStatusByTrade.has(tid)) {
-      txFirstStatusByTrade.set(tid, (tx.position_status || (tx as any).status || '').trim());
+      const codeNum = Number(tid);
+      const tr = !isNaN(codeNum) ? tradesByCode.get(codeNum) : undefined;
+      const st = tr?.status || (tx as any).trade?.status || (tx as any).status || '';
+      txFirstStatusByTrade.set(tid, st.trim());
     }
     if (!txSymbolByTrade.has(tid) && tx.symbol) {
       txSymbolByTrade.set(tid, tx.symbol.trim().toUpperCase());
@@ -801,7 +804,7 @@ export const calcularRiskMultiples = (
     if (code <= 1) continue;
     const tr = tradesByCode.get(code);
     const txs = txsByTradeCode.get(code) || [];
-    const isClosed = tr ? tr.status === 'Closed' : (txs.length > 0 && txs.every(t => (t.position_status || '').toLowerCase() === 'closed'));
+    const isClosed = tr ? tr.status === 'Closed' : (txs.length > 0 && txs.every(t => (t.trade?.status || '').toLowerCase() === 'closed'));
 
     if (isClosed) {
       const rawStratName = tr?.strategies?.name || (tr as any)?.strategy || txs.find(t => t.strategies?.name)?.strategies?.name || txs.find(t => t.strategy)?.strategy || 'Unassigned';

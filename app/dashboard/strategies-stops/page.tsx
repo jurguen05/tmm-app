@@ -46,7 +46,6 @@ export default async function StrategiesStopsPage() {
     getSpyDailyCloses(supabase).catch(() => [])
   ])
   let consolidado: ReturnType<typeof consolidarStrategiesStops> = []
-  let missingOpenTrades: any[] = []
   let freshness: FreshnessStatus | null = null
 
   if (positions && positions.length > 0) {
@@ -89,7 +88,7 @@ export default async function StrategiesStopsPage() {
     const prefetchedSet = new Set(prefetchedCodes)
     const missingTradeCodes = Array.from(new Set(
       initialTxs
-        .filter(t => t.position_status?.toLowerCase() === 'open' && t.trade_code)
+        .filter(t => (t.trade?.status || '').toLowerCase() === 'open' && t.trade_code)
         .map(t => Number(t.trade_code))
         .filter(c => !isNaN(c) && c > 0 && !prefetchedSet.has(c))
     ))
@@ -128,22 +127,6 @@ export default async function StrategiesStopsPage() {
     const weekendTradesToFlag = consolidado
       .filter(c => c.weekend_trader_flag === true && c.trade_code && c.trade_code !== '-')
       .map(c => Number(c.trade_code));
-
-    // Detectar trades marcados como 'Open' pero ausentes en el Position Statement de hoy (Opción 2 con aviso)
-    const activeConsolidatedCodes = new Set(
-      consolidado
-        .map(c => String(c.trade_code))
-        .filter(c => c && c !== '-')
-    )
-    const activePositionSymbols = new Set(
-      positions.map(p => p.symbol?.trim().toUpperCase()).filter(Boolean)
-    )
-
-    missingOpenTrades = (openTrades || []).filter(tr => {
-      const matchCode = tr.trade_code && activeConsolidatedCodes.has(String(tr.trade_code))
-      const matchSymbol = tr.symbol && activePositionSymbols.has(tr.symbol.trim().toUpperCase())
-      return !matchCode && !matchSymbol
-    })
 
     // Las escrituras corren después de enviar la respuesta para no bloquear el render
     after(async () => {
@@ -219,7 +202,7 @@ export default async function StrategiesStopsPage() {
         )}
       </div>
 
-      <StrategiesStopsTable datos={consolidado} cargando={false} missingTrades={missingOpenTrades} />
+      <StrategiesStopsTable datos={consolidado} cargando={false} />
     </div>
   )
 }
