@@ -77,15 +77,43 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
     }
   }
 
+  // Agrupar transacciones completas por trade_code y verificar estado neto
+  const txsByCode = new Map<number, Transaction[]>();
+  for (const t of allTxs) {
+    const c = t.trade_code ? Number(t.trade_code) : null;
+    if (c && !isNaN(c) && c > 0) {
+      if (!txsByCode.has(c)) txsByCode.set(c, []);
+      txsByCode.get(c)!.push(t);
+    }
+  }
+
+  const desyncedCodesToSync: number[] = [];
+  for (const [codeNum, codeTxs] of txsByCode.entries()) {
+    const tr = tradesMap.get(codeNum);
+    if (tr) {
+      const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
+      if (tr.status !== realStatus) {
+        tr.status = realStatus;
+        desyncedCodesToSync.push(codeNum);
+      }
+    }
+  }
+
+  if (desyncedCodesToSync.length > 0) {
+    syncTradesForCodes(supabase, desyncedCodesToSync).catch(err => {
+      console.warn('[getTransactions] Auto-sync error:', err.message);
+    });
+  }
+
   return allTxs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     if (codeNum && tradesMap.has(codeNum)) {
       const tr = tradesMap.get(codeNum)!;
       return {
         ...t,
-        symbol: tr.symbol || t.symbol,
-        unique_key: tr.unique_key || t.unique_key,
-        instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
+        symbol: t.symbol || tr.symbol,
+        unique_key: t.unique_key || tr.unique_key,
+        instrument: (t.instrument || tr.instrument || 'Stock') as 'Stock' | 'Option',
         strategy_id: tr.strategy_id ?? t.strategy_id,
         strategies: tr.strategies || (tr.strategy_id ? t.strategies : t.strategies),
         strategy: tr.strategies?.name || t.strategy,
@@ -182,6 +210,22 @@ export async function getFilteredTransactions(
       .filter((c): c is number => !isNaN(c) && c > 0)
   ));
 
+  // Traer transacciones hermanas para completar los grupos de trade_code (soporta fusiones/cambio de símbolo)
+  let allTxs: Transaction[] = txs;
+  if (uniqueCodes.length > 0) {
+    const { data: siblingTxs } = await supabase
+      .from('transactions')
+      .select('*, strategies(name)')
+      .in('trade_code', uniqueCodes)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+    if (siblingTxs && siblingTxs.length > txs.length) {
+      const seenIds = new Set(siblingTxs.map((s: any) => s.id));
+      const orphans = txs.filter(t => !seenIds.has(t.id));
+      allTxs = [...siblingTxs, ...orphans];
+    }
+  }
+
   let tradesMap = new Map<number, any>();
   if (uniqueCodes.length > 0) {
     const { data: tradesData, error: tradesError } = await supabase
@@ -198,9 +242,9 @@ export async function getFilteredTransactions(
     }
   }
 
-  // Agrupar transacciones por trade_code
+  // Agrupar transacciones por trade_code y verificar estado neto para todos los códigos visibles
   const txsByCode = new Map<number, Transaction[]>();
-  for (const t of txs) {
+  for (const t of allTxs) {
     const c = t.trade_code ? Number(t.trade_code) : null;
     if (c && !isNaN(c) && c > 0) {
       if (!txsByCode.has(c)) txsByCode.set(c, []);
@@ -208,18 +252,14 @@ export async function getFilteredTransactions(
     }
   }
 
-  // Si se filtró por trade_code (ej: 105), tenemos el conjunto completo de sus transacciones.
-  // Verificamos si el estado en la tabla trades coincide con el balance neto real calculado.
   const desyncedCodesToSync: number[] = [];
-  if (filters.trade_code && filters.trade_code.trim()) {
-    for (const [codeNum, codeTxs] of txsByCode.entries()) {
-      const tr = tradesMap.get(codeNum);
-      if (tr) {
-        const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
-        if (tr.status !== realStatus) {
-          tr.status = realStatus;
-          desyncedCodesToSync.push(codeNum);
-        }
+  for (const [codeNum, codeTxs] of txsByCode.entries()) {
+    const tr = tradesMap.get(codeNum);
+    if (tr) {
+      const realStatus = calcularEstadoTradeDesdeTransacciones(codeTxs);
+      if (tr.status !== realStatus) {
+        tr.status = realStatus;
+        desyncedCodesToSync.push(codeNum);
       }
     }
   }
@@ -230,15 +270,15 @@ export async function getFilteredTransactions(
     });
   }
 
-  let enriched: Transaction[] = txs.map((t): Transaction => {
+  let enriched: Transaction[] = allTxs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     if (codeNum && tradesMap.has(codeNum)) {
       const tr = tradesMap.get(codeNum)!;
       return {
         ...t,
-        symbol: tr.symbol || t.symbol,
-        unique_key: tr.unique_key || t.unique_key,
-        instrument: (tr.instrument || t.instrument) as 'Stock' | 'Option',
+        symbol: t.symbol || tr.symbol,
+        unique_key: t.unique_key || tr.unique_key,
+        instrument: (t.instrument || tr.instrument || 'Stock') as 'Stock' | 'Option',
         strategy_id: tr.strategy_id ?? t.strategy_id,
         strategies: tr.strategies || t.strategies,
         strategy: tr.strategies?.name || t.strategy,
@@ -1140,10 +1180,8 @@ export async function resolveAndAssignTradesForTransactions(
 
   interface ActiveTradeState {
     trade: Partial<Trade>;
-    netStock: number;
-    netOption: number;
-    hasStock: boolean;
-    hasOption: boolean;
+    netQty: number;
+    hasTransactions: boolean;
   }
 
   const stateByCode = new Map<number, ActiveTradeState>();
@@ -1155,10 +1193,8 @@ export async function resolveAndAssignTradesForTransactions(
     const { id: _id, created_at: _ca, updated_at: _ua, strategies: _st, ...cleanTr } = tr;
     const state: ActiveTradeState = {
       trade: { ...cleanTr },
-      netStock: 0,
-      netOption: 0,
-      hasStock: false,
-      hasOption: false
+      netQty: 0,
+      hasTransactions: false
     };
     stateByCode.set(code, state);
     if (tr.unique_key) {
@@ -1171,17 +1207,29 @@ export async function resolveAndAssignTradesForTransactions(
     const state = stateByCode.get(code);
     if (!state) continue;
     const act = (t.action || '').trim().toLowerCase();
-    const qty = Math.abs(t.quantity || 0);
+    const rawQty = Number(t.quantity) || 0;
+    const absQty = Math.abs(rawQty);
     const isExp = act.includes('exp');
-    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || isExp || (t.amount !== null && t.amount !== undefined && t.amount > 0);
-    const delta = isBuy ? qty : (isSell ? -qty : 0);
-    if (t.instrument === 'Option') {
-      state.hasOption = true;
-      state.netOption = isExp ? (qty === 0 ? 0 : Math.max(0, state.netOption + delta)) : state.netOption + delta;
+    const isSell =
+      act.includes('sell') ||
+      act.includes('sold') ||
+      isExp ||
+      rawQty < 0 ||
+      (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const isBuy =
+      !isSell &&
+      (act.includes('buy') ||
+        act.includes('bot') ||
+        act.includes('bought') ||
+        (t.amount !== null && t.amount !== undefined && t.amount < 0) ||
+        rawQty > 0);
+
+    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
+    state.hasTransactions = true;
+    if (isExp) {
+      state.netQty = absQty === 0 ? 0 : Math.max(0, state.netQty + delta);
     } else {
-      state.hasStock = true;
-      state.netStock = isExp ? (qty === 0 ? 0 : Math.max(0, state.netStock + delta)) : state.netStock + delta;
+      state.netQty += delta;
     }
   }
 
@@ -1206,11 +1254,24 @@ export async function resolveAndAssignTradesForTransactions(
     const uKey = row.unique_key || row.symbol || 'UNKNOWN';
     const normUKey = normalizeUniqueKey(uKey);
     const act = (row.action || '').trim().toLowerCase();
-    const qty = Math.abs(row.quantity || 0);
+    const rawQty = Number(row.quantity) || 0;
+    const absQty = Math.abs(rawQty);
     const isExp = act.includes('exp');
-    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (row.amount !== null && row.amount !== undefined && row.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || isExp || (row.amount !== null && row.amount !== undefined && row.amount > 0);
-    const delta = isBuy ? qty : (isSell ? -qty : 0);
+    const isSell =
+      act.includes('sell') ||
+      act.includes('sold') ||
+      isExp ||
+      rawQty < 0 ||
+      (row.amount !== null && row.amount !== undefined && row.amount > 0);
+    const isBuy =
+      !isSell &&
+      (act.includes('buy') ||
+        act.includes('bot') ||
+        act.includes('bought') ||
+        (row.amount !== null && row.amount !== undefined && row.amount < 0) ||
+        rawQty > 0);
+
+    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
 
     let code = row.trade_code && !isNaN(Number(row.trade_code)) && Number(row.trade_code) > 0
       ? Number(row.trade_code)
@@ -1238,10 +1299,8 @@ export async function resolveAndAssignTradesForTransactions(
         };
         activeState = {
           trade: newTrade,
-          netStock: 0,
-          netOption: 0,
-          hasStock: false,
-          hasOption: false
+          netQty: 0,
+          hasTransactions: false
         };
         stateByCode.set(code, activeState);
         activeOpenByKey.set(normUKey, activeState);
@@ -1276,10 +1335,8 @@ export async function resolveAndAssignTradesForTransactions(
 
         activeState = {
           trade: newTrade,
-          netStock: 0,
-          netOption: 0,
-          hasStock: false,
-          hasOption: false
+          netQty: 0,
+          hasTransactions: false
         };
         stateByCode.set(code, activeState);
         activeOpenByKey.set(normUKey, activeState);
@@ -1289,19 +1346,17 @@ export async function resolveAndAssignTradesForTransactions(
 
     assignedTradeCodes.add(code);
 
-    // Actualizar balance neto del trade tras esta ejecución
-    if (row.instrument === 'Option') {
-      activeState.hasOption = true;
-      activeState.netOption = isExp ? (qty === 0 ? 0 : Math.max(0, activeState.netOption + delta)) : activeState.netOption + delta;
+    // Actualizar balance neto acumulado del trade_code
+    activeState.hasTransactions = true;
+    if (isExp) {
+      activeState.netQty = absQty === 0 ? 0 : Math.max(0, activeState.netQty + delta);
     } else {
-      activeState.hasStock = true;
-      activeState.netStock = isExp ? (qty === 0 ? 0 : Math.max(0, activeState.netStock + delta)) : activeState.netStock + delta;
+      activeState.netQty += delta;
     }
 
-    const stockClosed = !activeState.hasStock || Math.abs(activeState.netStock) <= 0.0001;
-    const optionClosed = !activeState.hasOption || Math.abs(activeState.netOption) <= 0.0001;
+    const isTradeClosed = activeState.hasTransactions && Math.abs(activeState.netQty) <= 0.0001;
 
-    if (stockClosed && optionClosed && (activeState.hasStock || activeState.hasOption)) {
+    if (isTradeClosed) {
       activeState.trade.status = 'Closed';
       row.position_status = 'Closed';
       activeOpenByKey.delete(normUKey);
@@ -1561,11 +1616,27 @@ export async function syncTradesForCodes(
         if (errUp) {
           console.warn(`[syncTradesForCodes] Error updating trade ${code}:`, errUp.message);
         }
+
+        // Sincronizar position_status en transactions para mantener consistencia
+        await supabase
+          .from('transactions')
+          .update({ position_status: calculatedStatus })
+          .eq('trade_code', code)
+          .catch(() => {});
       }
     }
 
     if (tradesToUpsert.length > 0) {
       await upsertTrades(supabase, tradesToUpsert);
+      for (const t of tradesToUpsert) {
+        if (t.trade_code && t.status) {
+          await supabase
+            .from('transactions')
+            .update({ position_status: t.status })
+            .eq('trade_code', t.trade_code)
+            .catch(() => {});
+        }
+      }
     }
   } catch (error: any) {
     console.warn('[syncTradesForCodes] Error en sincronización:', error.message);

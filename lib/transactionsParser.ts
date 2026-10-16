@@ -75,9 +75,19 @@ export const procesarFilasTransacciones = (
     const positionStatus: 'Open' | 'Closed' = rawStatus.toLowerCase() === 'closed' ? 'Closed' : 'Open';
 
     const rawPrice = normalizeNumber(row['Price'] || row['price']);
-    const rawQty = (row['Quantity'] || row['quantity']) 
-      ? Math.abs(parseFloat((row['Quantity'] || row['quantity']).toString().replace(/[^0-9.-]+/g, ''))) 
+    const parsedQty = (row['Quantity'] || row['quantity'])
+      ? parseFloat((row['Quantity'] || row['quantity']).toString().replace(/[^0-9.-]+/g, ''))
       : 0;
+    const actLower = String(row['Action'] || row['action'] || '').trim().toLowerCase();
+    const isStandardBuyOrSell =
+      actLower.includes('buy') ||
+      actLower.includes('bot') ||
+      actLower.includes('bought') ||
+      actLower.includes('sell') ||
+      actLower.includes('sold') ||
+      actLower.includes('exp');
+    // Para compras/ventas estándar se guarda magnitud positiva; para líneas de fusión/reorg sin Buy/Sell se preserva el signo (+/-)
+    const rawQty = isNaN(parsedQty) ? 0 : (isStandardBuyOrSell ? Math.abs(parsedQty) : parsedQty);
 
     const stockEntryPrice = instrument === 'Stock' 
       ? rawPrice 
@@ -91,7 +101,7 @@ export const procesarFilasTransacciones = (
       symbol: symbol,
       instrument: instrument,
       unique_key: uniqueKey,
-      quantity: isNaN(rawQty) ? 0 : rawQty,
+      quantity: rawQty,
       price: rawPrice,
       fees: normalizeNumber(row['Fees & Comm'] || row['fees'] || row['Fees']),
       amount: normalizeNumber(row['Amount'] || row['amount']),
@@ -154,55 +164,43 @@ export const extraerAccountIdDesdeNombre = (fileName: string, fallback = 'DESCON
 };
 
 /**
- * Calcula el estado de un trade ('Open' o 'Closed') a partir del balance neto de sus transacciones (Opción 1).
- * Si la cantidad neta de acciones u opciones remanentes es 0, el trade está 'Closed'.
- * Si aún queda posición abierta en acciones u opciones, el trade permanece 'Open'.
+ * Calcula el estado de un trade ('Open' o 'Closed') sumando las cantidades de todas las
+ * transacciones del trade_code sin importar el instrumento, símbolo o unique_key
+ * (soporta fusiones/cambios de ticker dentro del mismo trade_code).
  */
 export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Open' | 'Closed' => {
   if (!transacciones || transacciones.length === 0) return 'Closed';
 
-  let netStock = 0;
-  let hasStock = false;
-  let netOption = 0;
-  let hasOption = false;
+  let netQty = 0;
 
   for (const t of transacciones) {
     const act = (t.action || '').trim().toLowerCase();
-    const qty = Math.abs(t.quantity || 0);
+    const rawQty = Number(t.quantity) || 0;
+    const absQty = Math.abs(rawQty);
 
     const isExp = act.includes('exp');
-    const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || isExp || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const isSell =
+      act.includes('sell') ||
+      act.includes('sold') ||
+      isExp ||
+      rawQty < 0 ||
+      (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const isBuy =
+      !isSell &&
+      (act.includes('buy') ||
+        act.includes('bot') ||
+        act.includes('bought') ||
+        (t.amount !== null && t.amount !== undefined && t.amount < 0) ||
+        rawQty > 0);
 
-    const delta = isBuy ? qty : (isSell ? -qty : 0);
+    const delta = isSell ? -absQty : (isBuy ? absQty : 0);
 
-    if (t.instrument === 'Option') {
-      hasOption = true;
-      if (isExp) {
-        netOption = qty === 0 ? 0 : Math.max(0, netOption + delta);
-      } else {
-        netOption += delta;
-      }
+    if (isExp) {
+      netQty = absQty === 0 ? 0 : Math.max(0, netQty + delta);
     } else {
-      hasStock = true;
-      if (isExp) {
-        netStock = qty === 0 ? 0 : Math.max(0, netStock + delta);
-      } else {
-        netStock += delta;
-      }
+      netQty += delta;
     }
   }
 
-  // Si tiene posición en acciones y el balance no es cero -> sigue Abierto
-  if (hasStock && Math.abs(netStock) > 0.0001) {
-    return 'Open';
-  }
-
-  // Si tiene posición en opciones y el balance no es cero -> sigue Abierto
-  if (hasOption && Math.abs(netOption) > 0.0001) {
-    return 'Open';
-  }
-
-  // Si no queda posición remanente en ningún instrumento -> Cerrado
-  return 'Closed';
+  return Math.abs(netQty) > 0.0001 ? 'Open' : 'Closed';
 };

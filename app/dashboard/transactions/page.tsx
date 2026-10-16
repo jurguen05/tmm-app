@@ -54,7 +54,7 @@ export default async function TransactionsPage() {
 
   return (
     <div className="p-8">
-      <div className="max-w-[95%] mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-800">Transactions</h1>
           {statementDate && (
