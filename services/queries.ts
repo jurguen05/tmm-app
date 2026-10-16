@@ -3,7 +3,7 @@
 import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem } from '../types';
 import { calcularEstadoTradeDesdeTransacciones } from '../lib/transactionsParser';
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
-import { parsearFechaTOS, calcularDiasHabilesDiferencia } from '../lib/formatters';
+import { parsearFechaTOS, calcularDiasHabilesDiferencia, normalizeUniqueKey } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
 
 type SupabaseClient = any;
@@ -45,6 +45,21 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
 
   if (uniqueCodes.length === 0) return txs;
 
+  let allTxs: Transaction[] = txs;
+  if (limit <= 200) {
+    const { data: siblingTxs } = await supabase
+      .from('transactions')
+      .select('*, strategies(name)')
+      .in('trade_code', uniqueCodes)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+    if (siblingTxs && siblingTxs.length > txs.length) {
+      const seenIds = new Set(siblingTxs.map((s: any) => s.id));
+      const orphans = txs.filter(t => !seenIds.has(t.id));
+      allTxs = [...siblingTxs, ...orphans];
+    }
+  }
+
   const { data: tradesData, error: tradesError } = await supabase
     .from('trades')
     .select('*, strategies(name)')
@@ -52,7 +67,7 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
 
   if (tradesError) {
     console.warn('[getTransactions] Error fetching trades:', tradesError.message);
-    return txs;
+    return allTxs;
   }
 
   const tradesMap = new Map<number, any>();
@@ -62,7 +77,7 @@ export async function getTransactions(supabase: SupabaseClient, limit = 50): Pro
     }
   }
 
-  return txs.map((t): Transaction => {
+  return allTxs.map((t): Transaction => {
     const codeNum = t.trade_code ? Number(t.trade_code) : null;
     if (codeNum && tradesMap.has(codeNum)) {
       const tr = tradesMap.get(codeNum)!;
@@ -1022,13 +1037,26 @@ export async function upsertTrades(
 ): Promise<void> {
   if (!rows || rows.length === 0) return;
 
+  // Eliminar columnas autogeneradas (id, created_at, updated_at) y relaciones virtuales (strategies)
+  // para evitar que PostgREST incluya "id" en ?columns=... y envíe id=null en filas nuevas del lote
+  const cleanRows = rows.map((r: any) => {
+    const { id, created_at, updated_at, strategies, ...rest } = r;
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(rest)) {
+      if (v !== undefined) {
+        cleaned[k] = v;
+      }
+    }
+    return cleaned;
+  });
+
   const { error } = await supabase
     .from('trades')
-    .upsert(rows, { onConflict: 'trade_code' });
+    .upsert(cleanRows, { onConflict: 'trade_code' });
 
   if (error) {
     if (error.message && error.message.includes('instrument')) {
-      const fallbackRows = rows.map(({ instrument, ...rest }) => rest);
+      const fallbackRows = cleanRows.map(({ instrument, ...rest }) => rest);
       const { error: fbErr } = await supabase
         .from('trades')
         .upsert(fallbackRows, { onConflict: 'trade_code' });
@@ -1071,7 +1099,23 @@ export async function resolveAndAssignTradesForTransactions(
   let nextTradeCode = Math.max(isNaN(maxInTrades) ? 1 : maxInTrades, isNaN(maxInTxs) ? 1 : maxInTxs, 1) + 1;
 
   // 2. Obtener trades actualmente 'Open' en la tabla maestra 'trades' para los unique_key del lote
-  const uniqueKeys = Array.from(new Set(rows.map(r => r.unique_key || r.symbol).filter(Boolean)));
+  const rawKeys = Array.from(new Set(rows.map(r => r.unique_key || r.symbol).filter(Boolean)));
+  const keysToQuery = new Set<string>();
+  for (const k of rawKeys) {
+    keysToQuery.add(k);
+    keysToQuery.add(normalizeUniqueKey(k));
+    const match = String(k).trim().match(/^([A-Z]+)-(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/i);
+    if (match) {
+      const ticker = match[1].toUpperCase();
+      const p1 = match[2].padStart(2, '0');
+      const p2 = match[3].padStart(2, '0');
+      const yyyy = match[4];
+      const rest = match[5];
+      keysToQuery.add(`${ticker}-${p1}/${p2}/${yyyy} ${rest}`);
+      keysToQuery.add(`${ticker}-${p2}/${p1}/${yyyy} ${rest}`);
+    }
+  }
+  const uniqueKeys = Array.from(keysToQuery);
   const { data: openTradesData } = uniqueKeys.length > 0
     ? await supabase
         .from('trades')
@@ -1084,6 +1128,7 @@ export async function resolveAndAssignTradesForTransactions(
   const openTradeCodes = openTradesList
     .map(t => Number(t.trade_code))
     .filter(c => !isNaN(c) && c > 0);
+  const existingDbCodes = new Set<number>(openTradeCodes);
 
   // 3. Obtener transacciones previas de esos trades abiertos para llevar el balance neto acumulado exacto
   const { data: existingOpenTxs } = openTradeCodes.length > 0
@@ -1107,8 +1152,9 @@ export async function resolveAndAssignTradesForTransactions(
   for (const tr of openTradesList) {
     const code = Number(tr.trade_code);
     if (isNaN(code) || code <= 0) continue;
+    const { id: _id, created_at: _ca, updated_at: _ua, strategies: _st, ...cleanTr } = tr;
     const state: ActiveTradeState = {
-      trade: { ...tr },
+      trade: { ...cleanTr },
       netStock: 0,
       netOption: 0,
       hasStock: false,
@@ -1116,7 +1162,7 @@ export async function resolveAndAssignTradesForTransactions(
     };
     stateByCode.set(code, state);
     if (tr.unique_key) {
-      activeOpenByKey.set(tr.unique_key, state);
+      activeOpenByKey.set(normalizeUniqueKey(tr.unique_key), state);
     }
   }
 
@@ -1126,15 +1172,16 @@ export async function resolveAndAssignTradesForTransactions(
     if (!state) continue;
     const act = (t.action || '').trim().toLowerCase();
     const qty = Math.abs(t.quantity || 0);
+    const isExp = act.includes('exp');
     const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const isSell = act.includes('sell') || act.includes('sold') || isExp || (t.amount !== null && t.amount !== undefined && t.amount > 0);
     const delta = isBuy ? qty : (isSell ? -qty : 0);
     if (t.instrument === 'Option') {
       state.hasOption = true;
-      state.netOption += delta;
+      state.netOption = isExp ? (qty === 0 ? 0 : Math.max(0, state.netOption + delta)) : state.netOption + delta;
     } else {
       state.hasStock = true;
-      state.netStock += delta;
+      state.netStock = isExp ? (qty === 0 ? 0 : Math.max(0, state.netStock + delta)) : state.netStock + delta;
     }
   }
 
@@ -1152,14 +1199,17 @@ export async function resolveAndAssignTradesForTransactions(
   });
 
   const tradesToUpsertMap = new Map<number, Partial<Trade>>();
+  const existingCodesToClose = new Set<number>();
   const assignedTradeCodes = new Set<number>();
 
   for (const row of clonedRows) {
     const uKey = row.unique_key || row.symbol || 'UNKNOWN';
+    const normUKey = normalizeUniqueKey(uKey);
     const act = (row.action || '').trim().toLowerCase();
     const qty = Math.abs(row.quantity || 0);
+    const isExp = act.includes('exp');
     const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (row.amount !== null && row.amount !== undefined && row.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || (row.amount !== null && row.amount !== undefined && row.amount > 0);
+    const isSell = act.includes('sell') || act.includes('sold') || isExp || (row.amount !== null && row.amount !== undefined && row.amount > 0);
     const delta = isBuy ? qty : (isSell ? -qty : 0);
 
     let code = row.trade_code && !isNaN(Number(row.trade_code)) && Number(row.trade_code) > 0
@@ -1194,12 +1244,12 @@ export async function resolveAndAssignTradesForTransactions(
           hasOption: false
         };
         stateByCode.set(code, activeState);
-        activeOpenByKey.set(uKey, activeState);
+        activeOpenByKey.set(normUKey, activeState);
         tradesToUpsertMap.set(code, newTrade);
       }
     } else {
       // Buscar trade maestro 'Open' para este unique_key
-      activeState = activeOpenByKey.get(uKey);
+      activeState = activeOpenByKey.get(normUKey);
 
       if (activeState && activeState.trade.trade_code) {
         code = Number(activeState.trade.trade_code);
@@ -1232,7 +1282,7 @@ export async function resolveAndAssignTradesForTransactions(
           hasOption: false
         };
         stateByCode.set(code, activeState);
-        activeOpenByKey.set(uKey, activeState);
+        activeOpenByKey.set(normUKey, activeState);
         tradesToUpsertMap.set(code, newTrade);
       }
     }
@@ -1242,10 +1292,10 @@ export async function resolveAndAssignTradesForTransactions(
     // Actualizar balance neto del trade tras esta ejecución
     if (row.instrument === 'Option') {
       activeState.hasOption = true;
-      activeState.netOption += delta;
+      activeState.netOption = isExp ? (qty === 0 ? 0 : Math.max(0, activeState.netOption + delta)) : activeState.netOption + delta;
     } else {
       activeState.hasStock = true;
-      activeState.netStock += delta;
+      activeState.netStock = isExp ? (qty === 0 ? 0 : Math.max(0, activeState.netStock + delta)) : activeState.netStock + delta;
     }
 
     const stockClosed = !activeState.hasStock || Math.abs(activeState.netStock) <= 0.0001;
@@ -1254,17 +1304,30 @@ export async function resolveAndAssignTradesForTransactions(
     if (stockClosed && optionClosed && (activeState.hasStock || activeState.hasOption)) {
       activeState.trade.status = 'Closed';
       row.position_status = 'Closed';
-      activeOpenByKey.delete(uKey);
-      tradesToUpsertMap.set(code, activeState.trade);
+      activeOpenByKey.delete(normUKey);
+      if (existingDbCodes.has(code)) {
+        existingCodesToClose.add(code);
+      } else {
+        tradesToUpsertMap.set(code, activeState.trade);
+      }
     } else {
       activeState.trade.status = 'Open';
       row.position_status = 'Open';
+      if (existingDbCodes.has(code)) {
+        existingCodesToClose.delete(code);
+      }
     }
   }
 
-  // 5. Persistir primero los registros maestros en 'trades' antes de insertar en 'transactions'
+  // 5. Persistir primero los registros maestros nuevos en 'trades' y cerrar los existentes que correspondan
   if (tradesToUpsertMap.size > 0) {
     await upsertTrades(supabase, Array.from(tradesToUpsertMap.values()));
+  }
+  if (existingCodesToClose.size > 0) {
+    await supabase
+      .from('trades')
+      .update({ status: 'Closed' })
+      .in('trade_code', Array.from(existingCodesToClose));
   }
 
   // Restaurar el orden original de las filas con sus trade_code ya asignados
@@ -1404,7 +1467,7 @@ export async function syncTradesForCodes(
       if (calculatedStatus === 'Closed') {
         const txsSell = codeTxs.filter(t => {
           const act = (t.action || '').trim().toLowerCase();
-          return act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+          return act.includes('sell') || act.includes('sold') || act.includes('exp') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
         });
         const lastSellTx = txsSell.length > 0 ? txsSell[txsSell.length - 1] : codeTxs[codeTxs.length - 1];
         if (lastSellTx) {

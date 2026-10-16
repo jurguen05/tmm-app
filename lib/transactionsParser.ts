@@ -170,17 +170,26 @@ export const calcularEstadoTradeDesdeTransacciones = (transacciones: any[]): 'Op
     const act = (t.action || '').trim().toLowerCase();
     const qty = Math.abs(t.quantity || 0);
 
+    const isExp = act.includes('exp');
     const isBuy = act.includes('buy') || act.includes('bot') || act.includes('bought') || (t.amount !== null && t.amount !== undefined && t.amount < 0);
-    const isSell = act.includes('sell') || act.includes('sold') || (t.amount !== null && t.amount !== undefined && t.amount > 0);
+    const isSell = act.includes('sell') || act.includes('sold') || isExp || (t.amount !== null && t.amount !== undefined && t.amount > 0);
 
     const delta = isBuy ? qty : (isSell ? -qty : 0);
 
     if (t.instrument === 'Option') {
       hasOption = true;
-      netOption += delta;
+      if (isExp) {
+        netOption = qty === 0 ? 0 : Math.max(0, netOption + delta);
+      } else {
+        netOption += delta;
+      }
     } else {
       hasStock = true;
-      netStock += delta;
+      if (isExp) {
+        netStock = qty === 0 ? 0 : Math.max(0, netStock + delta);
+      } else {
+        netStock += delta;
+      }
     }
   }
 
