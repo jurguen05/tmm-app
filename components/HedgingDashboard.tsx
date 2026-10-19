@@ -632,7 +632,7 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
                 <th className="py-3 px-4 text-center">Market Drop</th>
                 <th className="py-3 px-4 text-right">QQQ Spot</th>
                 <th className="py-3 px-4 text-center">&Delta; IV / Proj. IV</th>
-                <th className="py-3 px-4 text-right">Exposed Capital (Stocks & Calls)</th>
+                <th className="py-3 px-4 text-right">Exposed Capital</th>
                 <th className="py-3 px-4 text-right">Unhedged Loss ($)</th>
                 <th className="py-3 px-4 text-right">Unhedged DD (%)</th>
                 <th className="py-3 px-4 text-right text-purple-700">Hedge Gain ($)</th>
