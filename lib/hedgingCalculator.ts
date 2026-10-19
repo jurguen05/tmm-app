@@ -21,6 +21,7 @@ import { calcularPortfolioRisk } from './portfolioRiskCalculator';
  * extendida con dinámica de crisis sistémica y VIX extremo hasta el -50%.
  */
 export const MARIAN_SHIELD_IV_EXPANSION_PTS: Record<number, number> = {
+  0: 0.0,  // Base de mercado actual
   5: 8.4,
   10: 12.2,
   15: 15.4,
@@ -340,7 +341,7 @@ export function simularMarianShield(
     });
   });
 
-  const dropPercentages = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+  const dropPercentages = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
   const qqqCurrentPrice = budget.qqqPrice > 0 ? budget.qqqPrice : 500;
   const totalEquity = budget.totalEquity > 0 ? budget.totalEquity : 1;
   const initialStockCapital = portfolioRisk.totalCapital;

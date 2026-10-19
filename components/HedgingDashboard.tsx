@@ -611,12 +611,14 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
                     <td className="py-3 px-4 text-center">
                       <span
                         className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-extrabold ${
-                          step.dropPct >= 30
-                            ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                            : (step.dropPct >= 15 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-gray-100 text-gray-800')
+                          step.dropPct === 0
+                            ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                            : (step.dropPct >= 30
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : (step.dropPct >= 15 ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-gray-100 text-gray-800'))
                         }`}
                       >
-                        -{step.dropPct}%
+                        {step.dropPct === 0 ? '0% (Base)' : `-${step.dropPct}%`}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right text-gray-700">
