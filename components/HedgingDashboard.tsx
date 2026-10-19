@@ -211,18 +211,7 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
             <div className="text-3xl font-extrabold text-purple-600 tracking-tight font-mono">
               {formatMoney(budget.totalMonthlyBudget)}
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 mt-2">
-              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
-                A (30%): {formatMoney(budget.trancheABudgetMonthly)}
-              </span>
-              <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
-                B (40%): {formatMoney(budget.trancheBBudgetMonthly)}
-              </span>
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                C (30%): {formatMoney(budget.trancheCBudgetMonthly)}
-              </span>
-            </div>
-            <p className="text-[11px] text-gray-500 mt-2">
+            <p className="text-xs text-gray-500 mt-1">
               Annual: {formatMoney(budget.totalAnnualBudget)} ({formatPct(budget.totalHedgePct)} of equity)
             </p>
           </div>
@@ -392,202 +381,15 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
               {formatMoney(budget.totalAnnualBudget)} / yr
             </div>
             <div className="text-xs text-purple-700 mt-1">
-              Monthly Total: <strong>{formatMoney(budget.totalMonthlyBudget)}</strong> ({formatPct(budget.totalHedgePct)} Ann.)
+              Monthly: <strong>{formatMoney(budget.totalMonthlyBudget)}</strong> ({formatPct(budget.totalHedgePct)} Ann.)
             </div>
             <div className="text-[11px] text-gray-500 mt-2 font-sans">
-              Continuous rolling protection target partitioned across 30 / 40 / 30 staggered maturity ladders.
-            </div>
-          </div>
-        </div>
-
-        {/* 2b. SPITZNAGEL 3-TRANCHE LADDER ROLL ARCHITECTURE (30 / 40 / 30) */}
-        <div className="pt-2 border-t border-gray-100 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
-              <span>🪜</span>
-              <span>Spitznagel 3-Tranche Staggered Maturity Ladder (30% / 40% / 30% Architecture)</span>
-            </div>
-            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
-              Standard Roll Destination: 180 DTE (M6)
-            </span>
-          </div>
-
-          {/* Three Tranche Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
-            {/* Tranche A */}
-            <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/40">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-indigo-900 uppercase">Tranche A (Front M1)</span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-indigo-200 text-indigo-900">
-                  30% Weight
-                </span>
-              </div>
-              <div className="text-2xl font-black text-indigo-900 mt-2 font-mono">
-                {formatMoney(budget.trancheABudgetMonthly)}
-                <span className="text-xs font-medium text-gray-500 font-sans ml-1">/ mo</span>
-              </div>
-              <div className="text-xs text-indigo-700 font-semibold mt-1">
-                Annual: {formatMoney(budget.trancheABudgetAnnual)}
-              </div>
-              <p className="text-[11px] text-gray-600 mt-2 font-sans leading-relaxed">
-                <strong>Despliegue inicial: 30 DTE.</strong> Vence en M1 y se rollea a <strong>180 DTE (Tranche D)</strong>. Alta convexidad gamma para amortiguar el primer impacto de caída inmediata.
-              </p>
-            </div>
-
-            {/* Tranche B */}
-            <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-amber-900 uppercase">Tranche B (Mid M3)</span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-amber-200 text-amber-900">
-                  40% Weight
-                </span>
-              </div>
-              <div className="text-2xl font-black text-amber-900 mt-2 font-mono">
-                {formatMoney(budget.trancheBBudgetMonthly)}
-                <span className="text-xs font-medium text-gray-500 font-sans ml-1">/ mo</span>
-              </div>
-              <div className="text-xs text-amber-700 font-semibold mt-1">
-                Annual: {formatMoney(budget.trancheBBudgetAnnual)}
-              </div>
-              <p className="text-[11px] text-gray-600 mt-2 font-sans leading-relaxed">
-                <strong>Despliegue inicial: 90 DTE.</strong> Vence en M2/M3 y se rollea a <strong>180 DTE (Tranche E)</strong>. Constituye el núcleo central de la cobertura balanceando theta y convexidad.
-              </p>
-            </div>
-
-            {/* Tranche C */}
-            <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-900 uppercase">Tranche C (Back M6)</span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-200 text-emerald-900">
-                  30% Weight
-                </span>
-              </div>
-              <div className="text-2xl font-black text-emerald-900 mt-2 font-mono">
-                {formatMoney(budget.trancheCBudgetMonthly)}
-                <span className="text-xs font-medium text-gray-500 font-sans ml-1">/ mo</span>
-              </div>
-              <div className="text-xs text-emerald-700 font-semibold mt-1">
-                Annual: {formatMoney(budget.trancheCBudgetAnnual)}
-              </div>
-              <p className="text-[11px] text-gray-600 mt-2 font-sans leading-relaxed">
-                <strong>Despliegue inicial: 180 DTE.</strong> Vence en M6 e inicia el <em>True Steady State</em> rolleando a <strong>180 DTE (Tranche F)</strong>. Mínimo decay por theta y ancla de volatilidad.
-              </p>
-            </div>
-          </div>
-
-          {/* 12-Month Mechanical Rolling Matrix */}
-          <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
-            <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between text-xs font-semibold text-gray-700">
-              <span>📅 Spitznagel Execution Schedule (Month 0 to Month 12 Steady-State Lifecycle)</span>
-              <span className="text-[11px] text-gray-500">Rolling Rule: Replace expiring tranche with fresh 180 DTE</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse font-mono">
-                <thead>
-                  <tr className="bg-gray-50/75 border-b border-gray-200 text-[11px] font-bold uppercase tracking-wider text-gray-500">
-                    <th className="py-2.5 px-3 text-center">Month</th>
-                    <th className="py-2.5 px-3">Action / Phase</th>
-                    <th className="py-2.5 px-3 text-center">Leg 1 (Short)</th>
-                    <th className="py-2.5 px-3 text-center">Leg 2 (Mid)</th>
-                    <th className="py-2.5 px-3 text-center">Leg 3 (Long)</th>
-                    <th className="py-2.5 px-3 font-sans">Status & Execution Note</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-xs">
-                  <tr className="bg-indigo-50/20">
-                    <td className="py-2 px-3 text-center font-bold text-gray-900">0</td>
-                    <td className="py-2 px-3 font-bold text-indigo-700">Initial Deployment</td>
-                    <td className="py-2 px-3 text-center text-indigo-600 font-semibold">A: 30 DTE</td>
-                    <td className="py-2 px-3 text-center text-amber-600 font-semibold">B: 90 DTE</td>
-                    <td className="py-2 px-3 text-center text-emerald-600 font-semibold">C: 180 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">Deploy entire ladder (30% A / 40% B / 30% C). A expires M1, B in M3, C in M6.</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-center font-bold text-gray-900">1</td>
-                    <td className="py-2 px-3 font-bold text-rose-600">Roll A → D</td>
-                    <td className="py-2 px-3 text-center bg-rose-50 text-rose-700 font-bold">A: 0d (Exp) → D: 180d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">B: 60 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">C: 150 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">Shortest position (A) expires. Replace with fresh 180 DTE (D).</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-center font-bold text-gray-900">2</td>
-                    <td className="py-2 px-3 font-bold text-rose-600">Roll B → E</td>
-                    <td className="py-2 px-3 text-center text-gray-600">D: 150 DTE</td>
-                    <td className="py-2 px-3 text-center bg-rose-50 text-rose-700 font-bold">B: 30d (Exp) → E: 180d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">C: 120 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">Original 90 DTE (B) expires. Replace with fresh 180 DTE (E).</td>
-                  </tr>
-                  <tr className="bg-emerald-50/20">
-                    <td className="py-2 px-3 text-center font-bold text-gray-700">3</td>
-                    <td className="py-2 px-3 font-bold text-emerald-700">No Roll</td>
-                    <td className="py-2 px-3 text-center text-gray-600">D: 120 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">E: 150 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">C: 90 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">No expiries. All positions have 90+ DTE remaining. Natural aging.</td>
-                  </tr>
-                  <tr className="bg-emerald-50/20">
-                    <td className="py-2 px-3 text-center font-bold text-gray-700">4</td>
-                    <td className="py-2 px-3 font-bold text-emerald-700">No Roll</td>
-                    <td className="py-2 px-3 text-center text-gray-600">D: 90 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">E: 120 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">C: 60 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">No expiries. Position C becoming shortest but still has 2 months to go.</td>
-                  </tr>
-                  <tr className="bg-emerald-50/20">
-                    <td className="py-2 px-3 text-center font-bold text-gray-700">5</td>
-                    <td className="py-2 px-3 font-bold text-emerald-700">No Roll</td>
-                    <td className="py-2 px-3 text-center text-gray-600">D: 60 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">E: 90 DTE</td>
-                    <td className="py-2 px-3 text-center text-amber-700 font-bold">C: 30 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">No roll yet. Position C reaches 30 DTE - will roll next month at expiry.</td>
-                  </tr>
-                  <tr className="bg-purple-50/30">
-                    <td className="py-2 px-3 text-center font-bold text-purple-900">6</td>
-                    <td className="py-2 px-3 font-bold text-purple-700">Roll C → F (Steady State)</td>
-                    <td className="py-2 px-3 text-center text-gray-600">D: 30 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">E: 60 DTE</td>
-                    <td className="py-2 px-3 text-center bg-purple-100 text-purple-800 font-bold">C: 0d (Exp) → F: 180d</td>
-                    <td className="py-2 px-3 font-sans text-purple-900 font-semibold text-[11px]">Original 180 DTE (C) expires after 6 months. TRUE STEADY STATE LADDER STARTS.</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-center font-bold text-gray-900">7</td>
-                    <td className="py-2 px-3 font-bold text-rose-600">Roll D → G</td>
-                    <td className="py-2 px-3 text-center bg-rose-50 text-rose-700 font-bold">D: 0d (Exp) → G: 180d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">E: 30 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">F: 150 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">First M1 replacement (D) expires. Roll shortest to fresh 180 DTE (G).</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-center font-bold text-gray-900">8</td>
-                    <td className="py-2 px-3 font-bold text-rose-600">Roll E → H</td>
-                    <td className="py-2 px-3 text-center text-gray-600">G: 150 DTE</td>
-                    <td className="py-2 px-3 text-center bg-rose-50 text-rose-700 font-bold">E: 0d (Exp) → H: 180d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">F: 120 DTE</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">First M2 replacement (E) expires. Roll shortest to fresh 180 DTE (H).</td>
-                  </tr>
-                  <tr className="bg-emerald-50/20">
-                    <td className="py-2 px-3 text-center font-bold text-gray-700">9-11</td>
-                    <td className="py-2 px-3 font-bold text-emerald-700">No Roll Window</td>
-                    <td className="py-2 px-3 text-center text-gray-600">G: 120d → 60d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">H: 150d → 90d</td>
-                    <td className="py-2 px-3 text-center text-gray-600">F: 90d → 30d</td>
-                    <td className="py-2 px-3 font-sans text-gray-600 text-[11px]">Pattern repeats: Months with no rolls allow natural aging. F reaches 30 DTE in M11.</td>
-                  </tr>
-                  <tr className="bg-purple-50/30">
-                    <td className="py-2 px-3 text-center font-bold text-purple-900">12</td>
-                    <td className="py-2 px-3 font-bold text-purple-700">Roll F → I (Cycle Repeats)</td>
-                    <td className="py-2 px-3 text-center text-gray-600">G: 30 DTE</td>
-                    <td className="py-2 px-3 text-center text-gray-600">H: 60 DTE</td>
-                    <td className="py-2 px-3 text-center bg-purple-100 text-purple-800 font-bold">F: 0d (Exp) → I: 180d</td>
-                    <td className="py-2 px-3 font-sans text-purple-900 font-semibold text-[11px]">First M6 replacement (F) expires. True steady state repeats indefinitely every 6 months.</td>
-                  </tr>
-                </tbody>
-              </table>
+              Mechanical target capital allocated to continuous rolling QQQ 30% OTM Put protection.
             </div>
           </div>
         </div>
       </div>
+
 
 
 
