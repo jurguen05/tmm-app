@@ -66,6 +66,7 @@ export function calcularPortfolioRisk(
   }
 
   interface RawRiskItem {
+    id: string;
     trade_code: string;
     symbol: string;
     strategy: string;
@@ -74,7 +75,6 @@ export function calcularPortfolioRisk(
     distancePct: number;
     positionAmount: number;
     scenarioLoss: number;
-    isHedge: boolean;
   }
 
   const rawItems: RawRiskItem[] = [];
@@ -82,13 +82,18 @@ export function calcularPortfolioRisk(
   for (let i = 0; i < positions.length; i++) {
     const pos = positions[i];
     const cItem = (pos.id && consolidadoById.get(pos.id)) || consolidado[i];
+    const id = pos.id || `${cItem?.trade_code || pos.unique_key || 'pos'}-${pos.symbol || 'sym'}-${i}`;
 
     // Código y Símbolo
     const trade_code = cItem?.trade_code && cItem.trade_code !== '-' ? cItem.trade_code : (pos.unique_key || '-');
     const symbol = pos.symbol || cItem?.symbol || 'UNKNOWN';
     const strategy = cItem?.strategy || 'S/D';
     const normStrategy = strategy.toLowerCase().trim();
-    const isHedge = normStrategy.includes('hedge');
+
+    // Las coberturas (Hedges) se analizan en su propio módulo /dashboard/hedging y no tienen stop-loss direccional
+    if (normStrategy.includes('hedge')) {
+      continue;
+    }
 
     // Precio actual
     const currentPrice = (cItem?.lastPrice && cItem.lastPrice > 0)
@@ -119,11 +124,7 @@ export function calcularPortfolioRisk(
     let scenarioLoss = 0;
     let distancePct = 0;
 
-    if (isHedge) {
-      // En estrategias Hedge: scenarioLoss = 0 (no aplica stop de salida)
-      scenarioLoss = 0;
-      distancePct = 1; // Nunca salta en curva de caídas de mercado
-    } else if (stopPrice > 0 && currentPrice > 0) {
+    if (stopPrice > 0 && currentPrice > 0) {
       // Distancia al stop: (currentPrice - stopPrice) / currentPrice
       distancePct = (currentPrice - stopPrice) / currentPrice;
 
@@ -140,6 +141,7 @@ export function calcularPortfolioRisk(
     }
 
     rawItems.push({
+      id,
       trade_code,
       symbol,
       strategy,
@@ -147,8 +149,7 @@ export function calcularPortfolioRisk(
       stopPrice,
       distancePct,
       positionAmount,
-      scenarioLoss,
-      isHedge
+      scenarioLoss
     });
   }
 
@@ -181,6 +182,7 @@ export function calcularPortfolioRisk(
     const pctOfPortfolio = totalPortfolioRisk > 0 ? (item.scenarioLoss / totalPortfolioRisk) : 0;
 
     return {
+      id: item.id,
       trade_code: item.trade_code,
       symbol: item.symbol,
       strategy: item.strategy,
@@ -234,8 +236,8 @@ export function calcularPortfolioRisk(
     let stoppedPositionsCount = 0;
 
     for (const item of rawItems) {
-      // Salta si tiene stop válido, no es hedge y la distancia <= dropDecimal
-      if (!item.isHedge && item.stopPrice > 0 && item.distancePct <= dropDecimal) {
+      // Salta si tiene stop válido y la distancia <= dropDecimal
+      if (item.stopPrice > 0 && item.distancePct <= dropDecimal) {
         stoppedOutCapital += item.positionAmount;
         stoppedPositionsCount += 1;
       }

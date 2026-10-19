@@ -1,12 +1,27 @@
-import { ComingSoonModule } from '@/components/ComingSoonModule'
+import { connection } from 'next/server'
+import { createClientSSR } from '@/lib/supabaseServer'
+import { getAllClosedTrades } from '@/services/queries'
+import { calculatePnLHistogram } from '@/lib/histogramCalculator'
+import RiskHistogramDashboard from '@/components/RiskHistogramDashboard'
 
-export default function RiskStrategiesPage() {
+export const instant = false
+
+export default async function RiskStrategiesPage() {
+  await connection()
+  const supabase = await createClientSSR()
+
+  // 1. Cargar trades cerrados para el análisis de distribución de riesgo
+  const closedTrades = await getAllClosedTrades(supabase).catch(() => [])
+
+  // 2. Cálculo puro en dominio para SSR del histograma de P&L y curva CRF (30 bins estándar)
+  const histogramResult = calculatePnLHistogram(closedTrades, 30)
+
   return (
-    <ComingSoonModule
-      icon="📊"
-      iconColorClass="bg-indigo-50 text-indigo-600"
-      title="Risk Strategies"
-      description="Detailed risk analysis per strategy, historical R-multiples, capital efficiency, and strategy risk limits."
-    />
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
+      <RiskHistogramDashboard
+        initialTrades={closedTrades}
+        initialResult={histogramResult}
+      />
+    </div>
   )
 }

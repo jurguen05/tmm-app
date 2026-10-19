@@ -781,6 +781,36 @@ export async function getOpenTrades(supabase: SupabaseClient): Promise<Trade[]> 
   return data || [];
 }
 
+// 24b. Obtener todos los trades cerrados con paginación segura
+export async function getAllClosedTrades(supabase: SupabaseClient): Promise<Trade[]> {
+  const pageSize = 1000;
+  const allTrades: Trade[] = [];
+  let page = 0;
+
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from('trades')
+      .select('*, strategies(name)')
+      .eq('status', 'Closed')
+      .order('closed_date', { ascending: true, nullsFirst: false })
+      .order('trade_code', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.warn('[getAllClosedTrades] Warning:', error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    allTrades.push(...data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+
+  return allTrades;
+}
+
 // 25. Obtener trades por lista de trade_codes
 export async function getTradesByCodes(
   supabase: SupabaseClient,

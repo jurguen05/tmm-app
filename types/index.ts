@@ -244,6 +244,7 @@ export interface ExecutiveDashboardData {
 // ==========================================
 
 export interface PositionRiskItem {
+  id?: string;
   trade_code: string;
   symbol: string;
   strategy: string;
@@ -278,5 +279,59 @@ export interface PortfolioRiskResult {
   totalCapital: number;
   totalRisk: number;
   overallRiskPct: number;
+}
+
+// ==========================================
+// EQUITY CURVE & DRAWDOWN TYPES
+// ==========================================
+
+export interface EquityCurvePoint {
+  index: number;
+  trade_code: number;
+  symbol: string;
+  first_buy_date: string | null;
+  closed_date: string | null;
+  period_days: number;
+  pnl: number;
+  closed_equity: number;
+  peak: number | null;
+  running_peak: number;
+  drawdown_amount: number;
+  drawdown_pct: number;
+  is_peak: boolean;
+}
+
+export interface EquityCurveSummary {
+  points: EquityCurvePoint[];
+  currentClosedEquity: number;
+  maxHistoricalPeak: number;
+  maxDrawdownAmount: number;
+  maxDrawdownPct: number;
+  maxUnderwaterTrades: number;
+  maxUnderwaterDays: number;
+  totalClosedTrades: number;
+}
+
+// ==========================================
+// P&L HISTOGRAM & RISK STRATEGIES TYPES
+// ==========================================
+
+export interface HistogramBin {
+  binIndex: number;
+  binLower: number;
+  binUpper: number;
+  binMid: number;
+  binLabel: string;
+  f: number;
+  rfd: number;
+  crf: number;
+}
+
+export interface HistogramResult {
+  min: number;
+  max: number;
+  mean: number;
+  n: number;
+  bins: HistogramBin[];
 }
 

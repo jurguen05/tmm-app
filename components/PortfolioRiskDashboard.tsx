@@ -436,12 +436,11 @@ export default function PortfolioRiskDashboard({ initialData }: PortfolioRiskDas
                   </td>
                 </tr>
               ) : (
-                filteredPositions.map(pos => {
-                  const isHedge = pos.strategy.toLowerCase().includes('hedge')
-                  const isDistanceNegative = pos.distancePct <= 0 && !isHedge
+                filteredPositions.map((pos, idx) => {
+                  const isDistanceNegative = pos.distancePct <= 0
 
                   return (
-                    <tr key={`${pos.trade_code}-${pos.symbol}`} className="hover:bg-gray-50/60 transition-colors">
+                    <tr key={pos.id ? `${pos.id}` : `${pos.trade_code}-${pos.symbol}-${idx}`} className="hover:bg-gray-50/60 transition-colors">
                       <td className="py-3 px-4 text-gray-600 font-sans text-xs">
                         {pos.trade_code}
                       </td>
@@ -457,28 +456,22 @@ export default function PortfolioRiskDashboard({ initialData }: PortfolioRiskDas
                         {formatMoney(pos.currentPrice)}
                       </td>
                       <td className="py-3 px-4 text-right text-gray-800">
-                        {isHedge ? (
-                          <span className="text-gray-400 font-sans text-xs">N/A</span>
-                        ) : pos.stopPrice > 0 ? (
+                        {pos.stopPrice > 0 ? (
                           formatMoney(pos.stopPrice)
                         ) : (
                           <span className="text-gray-400 font-sans text-xs">-</span>
                         )}
                       </td>
                       <td className="py-3 px-4 text-right">
-                        {isHedge ? (
-                          <span className="text-gray-400 font-sans text-xs">Hedge</span>
-                        ) : (
-                          <span className={`font-semibold ${
-                            isDistanceNegative
-                              ? 'text-rose-600'
-                              : pos.distancePct < 0.05
-                              ? 'text-amber-600'
-                              : 'text-emerald-600'
-                          }`}>
-                            {formatPct(pos.distancePct)}
-                          </span>
-                        )}
+                        <span className={`font-semibold ${
+                          isDistanceNegative
+                            ? 'text-rose-600'
+                            : pos.distancePct < 0.05
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
+                        }`}>
+                          {formatPct(pos.distancePct)}
+                        </span>
                       </td>
                       <td className="py-3 px-4 text-right text-gray-900 font-medium">
                         {formatMoney(pos.positionAmount)}
