@@ -2147,6 +2147,27 @@ export async function getConsolidatedTradingSourceData(supabase: SupabaseClient)
 
 export const getPortfolioRiskSourceData = getConsolidatedTradingSourceData;
 
+// 34b. Cargar todos los orígenes de datos requeridos por el módulo Hedging & Marian Shield
+export async function getHedgingSourceData(supabase: SupabaseClient): Promise<{
+  positions: Position[];
+  transactions: Transaction[];
+  mkTosQuotes: MkTosQuote[];
+  trades: Trade[];
+  strategies: Strategy[];
+  spyCloses: SpyDailyClose[];
+  cashBalance: number;
+}> {
+  const [consolidatedData, cashBalance] = await Promise.all([
+    getConsolidatedTradingSourceData(supabase),
+    getLatestPositionsCashBalance(supabase).catch(() => 0)
+  ]);
+
+  return {
+    ...consolidatedData,
+    cashBalance
+  };
+}
+
 // 40. Obtener trades nuevos o afectados que requieren revisión y enriquecimiento (strategy / stock_entry_price)
 export async function getTradesForEnrichment(
   supabase: SupabaseClient,

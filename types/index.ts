@@ -335,3 +335,72 @@ export interface HistogramResult {
   bins: HistogramBin[];
 }
 
+// ==========================================
+// HEDGING & MARIAN SHIELD (v4.0) TYPES
+// ==========================================
+
+export interface SpitznagelBudget {
+  totalEquity: number;
+  positionsValue: number;
+  currentLeverage: number;
+  baseTargetLeverage: number;
+  leverageIncrease: number;
+  isLayer2Active: boolean;
+  excessUnits: number;
+  qqqPrice: number;
+  targetStrike: number;
+  annualBaseBudget: number;
+  monthlyBaseBudget: number;
+  annualExposureBudget: number;
+  monthlyExposureBudget: number;
+  totalAnnualBudget: number;
+  totalMonthlyBudget: number;
+  totalHedgePct: number;
+}
+
+export type RollAlertStatus = 'OK' | 'ROLL_UP' | 'ROLL_FORWARD' | 'ROLL_BOTH';
+
+export interface HedgeContractItem {
+  id: string;
+  symbol: string;
+  unique_key: string;
+  strike: number;
+  expiration: string;
+  days: number;
+  quantity: number;
+  net_liq: number;
+  currentPrice: number;
+  option_delta: number;
+  option_theta: number;
+  rollUpNeeded: boolean;
+  rollForwardNeeded: boolean;
+  status: RollAlertStatus;
+}
+
+export interface MarianShieldStep {
+  dropPct: number;
+  dropDecimal: number;
+  qqqDropPrice: number;
+  ivExpansionPts: number;
+  projectedIV: number;
+  remainingStockExposure: number;
+  stoppedOutStockCapital: number;
+  stockLossAmount: number;
+  stockDrawdownPct: number;
+  hedgeGainAmount: number;
+  netLossAmount: number;
+  bufferedDrawdownPct: number;
+  intrinsicValuePerContract: number;
+  extrinsicValuePerContract: number;
+  totalHedgeValue: number;
+}
+
+export interface HedgingDashboardData {
+  budget: SpitznagelBudget;
+  hedgeContracts: HedgeContractItem[];
+  totalHedgeValue: number;
+  baselineIV: number;
+  marianShieldSteps: MarianShieldStep[];
+}
+
+
