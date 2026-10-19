@@ -211,7 +211,12 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
             <div className="text-3xl font-extrabold text-purple-600 tracking-tight font-mono">
               {formatMoney(budget.totalMonthlyBudget)}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
+                Ladder Tranche (50%): {formatMoney(budget.monthlyTrancheBudget)}
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">
               Annual: {formatMoney(budget.totalAnnualBudget)} ({formatPct(budget.totalHedgePct)} of equity)
             </p>
           </div>
@@ -352,7 +357,7 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
                 Layer 2: Leverage Surcharge
               </span>
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                budget.isLayer2Active ? 'bg-amber-200 text-amber-900' : 'bg-gray-200 text-gray-600'
+                budget.isLayer2Active ? `bg-amber-200 text-amber-900` : 'bg-gray-200 text-gray-600'
               }`}>
                 {budget.isLayer2Active ? `+${(budget.excessUnits * 0.4).toFixed(2)}% Ann.` : 'Inactive (0.0%)'}
               </span>
@@ -381,14 +386,58 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
               {formatMoney(budget.totalAnnualBudget)} / yr
             </div>
             <div className="text-xs text-purple-700 mt-1">
-              Monthly: <strong>{formatMoney(budget.totalMonthlyBudget)}</strong> ({formatPct(budget.totalHedgePct)} Ann.)
+              Monthly Total: <strong>{formatMoney(budget.totalMonthlyBudget)}</strong> ({formatPct(budget.totalHedgePct)} Ann.)
             </div>
             <div className="text-[11px] text-gray-500 mt-2 font-sans">
-              Target capital allocated to continuous rolling QQQ 30% OTM Put protection.
+              Continuous rolling protection target partitioned across alternating maturity ladders.
+            </div>
+          </div>
+        </div>
+
+        {/* 2b. SPITZNAGEL TWO-TRANCHE LADDER ROLL ARCHITECTURE */}
+        <div className="pt-2 border-t border-gray-100">
+          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3 flex items-center gap-1.5">
+            <span>🪜</span>
+            <span>Two-Tranche Staggered Maturity Ladder (50% / 50% Budget Split)</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+            {/* Ladder Tranche 1 */}
+            <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/40">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-indigo-900 uppercase">Ladder Tranche A (Front Cycle)</span>
+                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-indigo-200 text-indigo-900">
+                  50% Allocation
+                </span>
+              </div>
+              <div className="text-2xl font-black text-indigo-900 mt-2 font-mono">
+                {formatMoney(budget.monthlyTrancheBudget)}
+                <span className="text-xs font-medium text-gray-500 font-sans ml-1">/ month</span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-2 font-sans leading-relaxed">
+                Asignado al vencimiento más próximo (~60-90 DTE). Se renueva (Roll Forward) cuando el tiempo restante alcanza los <strong>&le; 30 días</strong> o el subyacente aleja el strike.
+              </p>
+            </div>
+
+            {/* Ladder Tranche 2 */}
+            <div className="p-4 rounded-xl border border-cyan-200 bg-cyan-50/40">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-cyan-900 uppercase">Ladder Tranche B (Back Cycle)</span>
+                <span className="px-2 py-0.5 rounded text-[11px] font-extrabold bg-cyan-200 text-cyan-900">
+                  50% Allocation
+                </span>
+              </div>
+              <div className="text-2xl font-black text-cyan-900 mt-2 font-mono">
+                {formatMoney(budget.monthlyTrancheBudget)}
+                <span className="text-xs font-medium text-gray-500 font-sans ml-1">/ month</span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-2 font-sans leading-relaxed">
+                Asignado al vencimiento escalonado posterior (~120-180 DTE). Mantiene cobertura continua ante colapsos lentos y minimiza el decay por theta al intercalar los ciclos de rolleo.
+              </p>
             </div>
           </div>
         </div>
       </div>
+
 
       {/* 3. ACTIVE PUTS AUDIT & ROLL ALERTS TABLE */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

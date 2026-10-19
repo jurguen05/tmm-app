@@ -179,9 +179,10 @@ export function calcularSpitznagelBudget(
   const annualExposureBudget = isLayer2Active ? totalEquity * (excessUnits * 0.004) : 0;
   const monthlyExposureBudget = annualExposureBudget / 12;
 
-  // Presupuesto Total
+  // Presupuesto Total y División por Tranche / Escalera (50% cada tranche)
   const totalAnnualBudget = annualBaseBudget + annualExposureBudget;
   const totalMonthlyBudget = totalAnnualBudget / 12;
+  const monthlyTrancheBudget = totalMonthlyBudget / 2;
   const totalHedgePct = totalEquity > 0 ? totalAnnualBudget / totalEquity : 0;
 
   // QQQ Spot y Target Strike (30% OTM = 70% del spot)
@@ -206,6 +207,7 @@ export function calcularSpitznagelBudget(
     monthlyExposureBudget: Number(monthlyExposureBudget.toFixed(2)),
     totalAnnualBudget: Number(totalAnnualBudget.toFixed(2)),
     totalMonthlyBudget: Number(totalMonthlyBudget.toFixed(2)),
+    monthlyTrancheBudget: Number(monthlyTrancheBudget.toFixed(2)),
     totalHedgePct: Number(totalHedgePct.toFixed(4))
   };
 }

@@ -355,6 +355,7 @@ export interface SpitznagelBudget {
   monthlyExposureBudget: number;
   totalAnnualBudget: number;
   totalMonthlyBudget: number;
+  monthlyTrancheBudget: number; // 50% del presupuesto mensual para cada tranche/escalera
   totalHedgePct: number;
 }
 
