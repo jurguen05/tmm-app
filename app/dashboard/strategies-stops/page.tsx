@@ -1,109 +1,35 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { connection, after } from 'next/server'
 import StrategiesStopsTable from '../../../components/StrategiesStopsTable'
 import { 
-  getPositions, 
-  getTransactionsByUniqueKeys, 
-  getLatestMkTosQuotes, 
-  getTransactionsByTradeCodes, 
-  getOpenTrades,
-  getActiveStrategies,
+  getConsolidatedTradingSourceData,
   updateTradesMaxStockPrices,
   updateTradesWeekendTraderFlags,
   updateTradesRatchetStops,
-  getSpyDailyCloses,
   autoArchiveOldMkTosFiles,
   getStrategiesStopsFreshness,
   FreshnessStatus
 } from '../../../services/queries'
 import { consolidarStrategiesStops } from '../../../lib/strategiesCalculator'
 import { formatearFecha } from '../../../lib/formatters'
+import { createClientSSR } from '../../../lib/supabaseServer'
 
 export const instant = false
 
 export default async function StrategiesStopsPage() {
   await connection()
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-      },
-    }
-  )
+  const supabase = await createClientSSR()
 
-  // Independientes de positions: se lanzan en paralelo
-  const [positions, openTrades, activeStrategies, spyCloses] = await Promise.all([
-    getPositions(supabase),
-    getOpenTrades(supabase),
-    getActiveStrategies(supabase).catch(() => []),
-    // Historial persistido de SPY vs SMA 10W (si la tabla aún no existe, se usa SPY de mk_tos_quotes)
-    getSpyDailyCloses(supabase).catch(() => [])
-  ])
+  const { positions, transactions, mkTosQuotes, trades, strategies, spyCloses } =
+    await getConsolidatedTradingSourceData(supabase)
+
   let consolidado: ReturnType<typeof consolidarStrategiesStops> = []
   let freshness: FreshnessStatus | null = null
 
   if (positions && positions.length > 0) {
-    const uniqueKeys = positions.map(p => p.unique_key).filter(Boolean)
-    const keysToQuery = new Set<string>()
-    for (const k of uniqueKeys) {
-      keysToQuery.add(k)
-      // Generar variante con día/mes invertido si es una opción
-      const match = k.trim().match(/^([A-Z]+)-(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/)
-      if (match) {
-        const ticker = match[1]
-        const p1 = match[2].padStart(2, '0')
-        const p2 = match[3].padStart(2, '0')
-        const yyyy = match[4]
-        const rest = match[5]
-        keysToQuery.add(`${ticker}-${p2}/${p1}/${yyyy} ${rest}`)
-      }
-    }
-
-    // Asegurarse de incluir SPY para evaluar el filtro de mercado de Weekend Trader
-    const symbols = Array.from(new Set([...positions.map(p => p.symbol).filter(Boolean), 'SPY']))
-
-    // Pre-cargar el historial completo de los trades abiertos (por trade_code) en paralelo con el resto
-    const prefetchedCodes = Array.from(new Set(
-      (openTrades || [])
-        .map(t => Number(t.trade_code))
-        .filter(c => !isNaN(c) && c > 0)
-    ))
-
-    // 1. Obtener transacciones vinculadas, cotizaciones MK-TOS, historial de trades y frescura de archivos en paralelo
-    const [initialTxs, mkTosQuotes, prefetchedTxs, freshnessData] = await Promise.all([
-      getTransactionsByUniqueKeys(supabase, Array.from(keysToQuery)),
-      getLatestMkTosQuotes(supabase, symbols),
-      getTransactionsByTradeCodes(supabase, prefetchedCodes),
-      getStrategiesStopsFreshness(supabase, positions).catch(() => null)
-    ])
+    const freshnessData = await getStrategiesStopsFreshness(supabase, positions).catch(() => null)
     freshness = freshnessData
 
-    // 2. Solo si hay trade_codes activos que no estaban pre-cargados, traerlos (fallback)
-    const prefetchedSet = new Set(prefetchedCodes)
-    const missingTradeCodes = Array.from(new Set(
-      initialTxs
-        .filter(t => (t.trade?.status || '').toLowerCase() === 'open' && t.trade_code)
-        .map(t => Number(t.trade_code))
-        .filter(c => !isNaN(c) && c > 0 && !prefetchedSet.has(c))
-    ))
-
-    const extraTxs = missingTradeCodes.length > 0
-      ? await getTransactionsByTradeCodes(supabase, missingTradeCodes)
-      : []
-
-    const txMap = new Map<string, typeof initialTxs[0]>()
-    initialTxs.forEach(t => txMap.set(t.id, t))
-    prefetchedTxs.forEach(t => txMap.set(t.id, t))
-    extraTxs.forEach(t => txMap.set(t.id, t))
-    const allRelevantTransactions = Array.from(txMap.values())
-
-    consolidado = consolidarStrategiesStops(positions, allRelevantTransactions, mkTosQuotes, openTrades, activeStrategies, spyCloses)
+    consolidado = consolidarStrategiesStops(positions, transactions, mkTosQuotes, trades, strategies, spyCloses)
 
     // Persistir max_stock_price, max_stock_price_date y weekend_trader_flag en la tabla trades
     const tradesWithMax = consolidado

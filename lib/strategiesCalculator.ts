@@ -657,3 +657,71 @@ export const consolidarStrategiesStops = (
 
   return consolidado.sort((a, b) => a.symbol.localeCompare(b.symbol));
 };
+
+/**
+ * Calcula las métricas de salida para cada una de las 9 estrategias (STRATEGIES_STOPS.md)
+ * al cerrar un trade (exit_price, exit_stop, exit_signal).
+ * Ubicada en la capa de dominio/cálculo puro.
+ */
+export function calculateStrategyExitMetrics(
+  strategyName: string,
+  quote: any | null,
+  stockEntryPrice: number | null,
+  maxStockPrice: number | null,
+  ratchetStop: number | null,
+  weekendTraderFlag: boolean,
+  fillSellPrice?: number | null
+): { exit_price: number | null; exit_stop: number | null; exit_signal: number | null } {
+  const sName = (strategyName || '').trim().toLowerCase();
+  const lastPrice = (quote && quote.last_price > 0) ? quote.last_price : (fillSellPrice || null);
+  let exit_price: number | null = lastPrice;
+  let exit_stop: number | null = null;
+  let exit_signal: number | null = null;
+
+  if (sName.includes('tech')) {
+    // 1. Tech Trader: max(Entry * 0.90, quote.ema)
+    const entryFloor = stockEntryPrice ? Number((stockEntryPrice * 0.90).toFixed(4)) : 0;
+    const emaVal = quote?.ema || 0;
+    exit_stop = Math.max(entryFloor, emaVal) || lastPrice;
+  } else if (sName.includes('flipper')) {
+    // 2. 20% Flipper: Max Stock Price * 0.80
+    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
+    exit_stop = peak > 0 ? Number((peak * 0.80).toFixed(4)) : lastPrice;
+  } else if (sName.includes('weekend')) {
+    // 3. Weekend Trader: High * 0.90 (si flag) o High * 0.60
+    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
+    const factor = weekendTraderFlag ? 0.90 : 0.60;
+    exit_stop = peak > 0 ? Number((peak * factor).toFixed(4)) : lastPrice;
+  } else if (sName.includes('trend') || sName.includes('pilot')) {
+    // 4. Trend Pilot: Stop = Last Price, Signal = trendpilot_stop (si >= 3)
+    exit_stop = lastPrice;
+    if (quote?.trendpilot_stop !== null && quote?.trendpilot_stop !== undefined && quote.trendpilot_stop >= 3) {
+      exit_signal = quote.trendpilot_stop;
+    }
+  } else if (sName.includes('mac')) {
+    // 5. MAC: Stop = Last Price, Signal = mac_stop (si >= 3)
+    exit_stop = lastPrice;
+    if (quote?.mac_stop !== null && quote?.mac_stop !== undefined && quote.mac_stop >= 3) {
+      exit_signal = quote.mac_stop;
+    }
+  } else if (sName.includes('newyearly') || sName.includes('yearly')) {
+    // 6. New Yearly Highs: max(ratchet_stop, low_52)
+    const rStop = ratchetStop || 0;
+    const low52 = quote?.low_52 || 0;
+    exit_stop = Math.max(rStop, low52) || lastPrice;
+  } else if (sName.includes('100')) {
+    // 7. 100-day-High: max(ratchet_stop, low_100_day)
+    const rStop = ratchetStop || 0;
+    const low100 = quote?.low_100_day || 0;
+    exit_stop = Math.max(rStop, low100) || lastPrice;
+  } else if (sName.includes('bbo') || sName.includes('bollinger')) {
+    // 8. BBO: Stop = quote.bollinger_bands
+    exit_stop = quote?.bollinger_bands || lastPrice;
+  } else {
+    // 9. Hedge / Default: Stop = Last Price
+    exit_stop = lastPrice;
+  }
+
+  return { exit_price, exit_stop, exit_signal };
+}
+

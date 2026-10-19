@@ -16,8 +16,11 @@ export const normalizeNumber = (value: string | number | undefined | null): numb
   return isNaN(num) ? 0 : num;
 };
 
+/**
+ * Formatea un valor monetario estándar (ej: 1.234,56 o -1.234,56).
+ */
 export const formatearMoneda = (valor: number | null | undefined): string => {
-  if (valor === null || valor === undefined) return '0,00';
+  if (valor === null || valor === undefined || isNaN(valor)) return '0,00';
   
   return new Intl.NumberFormat('es-AR', {
     minimumFractionDigits: 2,
@@ -25,16 +28,82 @@ export const formatearMoneda = (valor: number | null | undefined): string => {
   }).format(valor);
 };
 
+/** Alias en inglés para formatearMoneda */
+export const formatMoney = formatearMoneda;
+
+/**
+ * Formatea un valor numérico entero redondeado con separadores de miles (ej: 17.380 o -1.235).
+ */
+export const formatIntegerMoney = (valor: number | null | undefined): string => {
+  if (valor === null || valor === undefined || isNaN(valor)) return '0';
+  const isNeg = valor < 0;
+  const rounded = Math.round(Math.abs(valor));
+  const formatted = new Intl.NumberFormat('es-AR', {
+    maximumFractionDigits: 0
+  }).format(rounded);
+  return isNeg ? `-${formatted}` : formatted;
+};
+
+/**
+ * Formatea porcentajes con 2 decimales (ej: 12,34%).
+ */
+export const formatPct = (valor: number | null | undefined): string => {
+  if (valor === null || valor === undefined || isNaN(valor)) return '0,00%';
+  const formatted = new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(valor);
+  return `${formatted}%`;
+};
+
+/**
+ * Formateador de múltiplos R (ej: +0,35 R o -0,20 R).
+ */
+export const formatR = (valor: number | null | undefined): string => {
+  if (valor === null || valor === undefined || isNaN(valor)) return '0,00 R';
+  const formatted = new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(valor);
+  return valor > 0 ? `+${formatted} R` : `${formatted} R`;
+};
+
+/**
+ * Formateador de ratios numéricos simples con 2 decimales (ej: 2,15).
+ */
+export const formatRatio = (valor: number | null | undefined): string => {
+  if (valor === null || valor === undefined || isNaN(valor)) return '0,00';
+  return new Intl.NumberFormat('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(valor);
+};
+
+/**
+ * Parsea un string con formato argentino (ej: "17.379,61" o "17.380") a float estándar.
+ */
+export const parseNumberEsAR = (val: string | number | null | undefined): number => {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  let str = String(val).trim();
+  if (str.includes(',') && str.includes('.')) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (str.includes(',')) {
+    str = str.replace(',', '.');
+  } else if (str.includes('.')) {
+    if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
+      str = str.replace(/\./g, '');
+    }
+  }
+  const clean = str.replace(/[^0-9.-]+/g, '');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+};
+
 /**
  * Parsea fechas provenientes de ThinkorSwim (archivos CSV, cabeceras o nombres de archivo)
  * y devuelve siempre el formato ISO de fecha pura "YYYY-MM-DD" sin pasar por objetos Date,
  * evitando discrepancias de huso horario (UTC vs local).
- * 
- * Ejemplos soportados:
- * - "10/09/2026" -> "2026-10-09"
- * - "10/9/26 18:50:27" -> "2026-10-09"
- * - "Quote on 8/28/26 18:03:35" -> "2026-08-28"
- * - "2026-10-09-PositionStatement.csv" -> "2026-10-09"
  */
 export const parsearFechaTOS = (rawDate: string | null | undefined): string | null => {
   if (!rawDate) return null;

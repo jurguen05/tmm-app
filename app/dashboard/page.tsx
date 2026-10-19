@@ -1,26 +1,14 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import { getDashboardExecutiveSourceData } from '../../services/queries'
 import { calcularExecutiveDashboard } from '../../lib/dashboardStatsCalculator'
 import DashboardExecutiveTables from '../../components/DashboardExecutiveTables'
+import { createClientSSR } from '../../lib/supabaseServer'
 
 export const instant = false
 
 export default async function DashboardPage() {
   await connection()
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-      },
-    }
-  )
+  const supabase = await createClientSSR()
 
   // Carga de datos analíticos del Centro de Control Ejecutivo (incluyendo Cash & Sweep Vehicle)
   const { positions, transactions, strategies, trades, cashBalance } = await getDashboardExecutiveSourceData(supabase)

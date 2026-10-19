@@ -165,6 +165,13 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
       if (g.current_quantity === undefined || g.current_quantity === null) {
         g.current_quantity = calcularCurrentQuantityDesdeTransacciones(g.transactions)
       }
+      const firstWithTrade = g.transactions.find((t) => t.trade)
+      if (
+        firstWithTrade?.trade?.cash_flow !== undefined &&
+        firstWithTrade?.trade?.cash_flow !== null
+      ) {
+        g.net_cash_flow = Number(firstWithTrade.trade.cash_flow)
+      }
       g.transactions.sort((a, b) => {
         if (a.date !== b.date) return b.date.localeCompare(a.date)
         return (b.created_at || '').localeCompare(a.created_at || '')

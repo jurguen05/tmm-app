@@ -5,6 +5,9 @@ import { calcularEstadoTradeDesdeTransacciones, calcularCurrentQuantityDesdeTran
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia, normalizeUniqueKey } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
+import { calculateStrategyExitMetrics } from '../lib/strategiesCalculator';
+
+export { calculateStrategyExitMetrics };
 
 type SupabaseClient = any;
 
@@ -849,69 +852,7 @@ export async function updateTradeField(
   }
 }
 
-// 26c. Cerrar un trade registrando sus métricas de salida (exit_stop, exit_price, exit_signal, closed_date)
-// 26c1. Calcula las métricas de salida para cada una de las 9 estrategias (STRATEGIES_STOPS.md)
-export function calculateStrategyExitMetrics(
-  strategyName: string,
-  quote: any | null,
-  stockEntryPrice: number | null,
-  maxStockPrice: number | null,
-  ratchetStop: number | null,
-  weekendTraderFlag: boolean,
-  fillSellPrice?: number | null
-): { exit_price: number | null; exit_stop: number | null; exit_signal: number | null } {
-  const sName = (strategyName || '').trim().toLowerCase();
-  const lastPrice = (quote && quote.last_price > 0) ? quote.last_price : (fillSellPrice || null);
-  let exit_price: number | null = lastPrice;
-  let exit_stop: number | null = null;
-  let exit_signal: number | null = null;
 
-  if (sName.includes('tech')) {
-    // 1. Tech Trader: max(Entry * 0.90, quote.ema)
-    const entryFloor = stockEntryPrice ? Number((stockEntryPrice * 0.90).toFixed(4)) : 0;
-    const emaVal = quote?.ema || 0;
-    exit_stop = Math.max(entryFloor, emaVal) || lastPrice;
-  } else if (sName.includes('flipper')) {
-    // 2. 20% Flipper: Max Stock Price * 0.80
-    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
-    exit_stop = peak > 0 ? Number((peak * 0.80).toFixed(4)) : lastPrice;
-  } else if (sName.includes('weekend')) {
-    // 3. Weekend Trader: High * 0.90 (si flag) o High * 0.60
-    const peak = maxStockPrice || lastPrice || stockEntryPrice || 0;
-    const factor = weekendTraderFlag ? 0.90 : 0.60;
-    exit_stop = peak > 0 ? Number((peak * factor).toFixed(4)) : lastPrice;
-  } else if (sName.includes('trend') || sName.includes('pilot')) {
-    // 4. Trend Pilot: Stop = Last Price, Signal = trendpilot_stop (si >= 3)
-    exit_stop = lastPrice;
-    if (quote?.trendpilot_stop !== null && quote?.trendpilot_stop !== undefined && quote.trendpilot_stop >= 3) {
-      exit_signal = quote.trendpilot_stop;
-    }
-  } else if (sName.includes('mac')) {
-    // 5. MAC: Stop = Last Price, Signal = mac_stop (si >= 3)
-    exit_stop = lastPrice;
-    if (quote?.mac_stop !== null && quote?.mac_stop !== undefined && quote.mac_stop >= 3) {
-      exit_signal = quote.mac_stop;
-    }
-  } else if (sName.includes('newyearly') || sName.includes('yearly')) {
-    // 6. New Yearly Highs: max(ratchet_stop, low_52)
-    const rStop = ratchetStop || 0;
-    const low52 = quote?.low_52 || 0;
-    exit_stop = Math.max(rStop, low52) || lastPrice;
-  } else if (sName.includes('100')) {
-    // 7. 100-day-High: max(ratchet_stop, low_100_day)
-    const rStop = ratchetStop || 0;
-    const low100 = quote?.low_100_day || 0;
-    exit_stop = Math.max(rStop, low100) || lastPrice;
-  } else if (sName.includes('bbo') || sName.includes('bollinger')) {
-    // 8. BBO: Stop = quote.bollinger_bands
-    exit_stop = quote?.bollinger_bands || lastPrice;
-  } else {
-    // 9. Hedge / Default: Stop = Last Price
-    exit_stop = lastPrice;
-  }
-
-  return { exit_price, exit_stop, exit_signal };
-}
 
 // 26c. Cerrar un trade registrando sus métricas de salida (exit_stop, exit_price, exit_signal, closed_date)
 export async function closeTradeWithExitMetrics(
@@ -1104,11 +1045,29 @@ export async function resolveAndAssignTradesForTransactions(
   }
   const uniqueKeys = Array.from(keysToQuery);
 
-  // 3. Consultar TODOS los trades actualmente abiertos en la tabla maestra 'trades'
-  const { data: openTradesInDb } = await supabase
-    .from('trades')
-    .select('*')
-    .ilike('status', 'Open');
+  // 3. Consultar trades existentes en la tabla maestra 'trades' (abiertos y catálogo histórico para no perder estrategias)
+  const [{ data: openTradesInDb }, { data: allTradesInDb }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*')
+      .ilike('status', 'Open'),
+    supabase
+      .from('trades')
+      .select('trade_code, symbol, unique_key, instrument, strategy_id, stock_entry_price, status')
+  ]);
+
+  // Mapa global de todos los trades existentes para preservar estrategias y precios de entrada configurados
+  const existingMasterByCode = new Map<number, any>();
+  const existingMasterByKey = new Map<string, any>();
+  for (const tr of (allTradesInDb || [])) {
+    const code = Number(tr.trade_code);
+    if (!isNaN(code) && code > 0) {
+      existingMasterByCode.set(code, tr);
+    }
+    if (tr.unique_key) {
+      existingMasterByKey.set(normalizeUniqueKey(tr.unique_key), tr);
+    }
+  }
 
   // 4. Clonar filas entrantes para procesarlas en orden cronológico
   const clonedRows = rows.map((r, idx) => ({ ...r, _origIdx: idx }));
@@ -1225,16 +1184,17 @@ export async function resolveAndAssignTradesForTransactions(
       }
       activeState = stateByCode.get(code);
       if (!activeState) {
+        const masterExisting = (code !== null ? existingMasterByCode.get(code) : undefined) || existingMasterByKey.get(normUKey);
         const newTrade: Partial<Trade> = {
           trade_code: code,
-          symbol: row.symbol || uKey,
-          unique_key: uKey,
-          instrument: (row.instrument || 'Stock') as 'Stock' | 'Option',
-          strategy_id: row.strategy_id ?? null,
-          stock_entry_price: row.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
+          symbol: row.symbol || masterExisting?.symbol || uKey,
+          unique_key: masterExisting?.unique_key || uKey,
+          instrument: (row.instrument || masterExisting?.instrument || 'Stock') as 'Stock' | 'Option',
+          strategy_id: row.strategy_id ?? masterExisting?.strategy_id ?? null,
+          stock_entry_price: row.stock_entry_price ?? masterExisting?.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
           first_buy_date: row.date,
           status: 'Open',
-          weekend_trader_flag: false,
+          weekend_trader_flag: masterExisting?.weekend_trader_flag || false,
           account_id: row.account_id || defaultAccountId || null
         };
         activeState = {
@@ -1270,8 +1230,6 @@ export async function resolveAndAssignTradesForTransactions(
         }
       }
 
-
-
       if (activeState && activeState.trade.trade_code) {
         code = Number(activeState.trade.trade_code);
         row.trade_code = code;
@@ -1280,16 +1238,18 @@ export async function resolveAndAssignTradesForTransactions(
         code = nextTradeCode++;
         row.trade_code = code;
 
+        const masterExisting = existingMasterByCode.get(code) || existingMasterByKey.get(normUKey);
+
         const newTrade: Partial<Trade> = {
           trade_code: code,
-          symbol: row.symbol || uKey,
-          unique_key: uKey,
-          instrument: (row.instrument || 'Stock') as 'Stock' | 'Option',
-          strategy_id: null,
-          stock_entry_price: row.instrument === 'Stock' ? row.price : null,
+          symbol: row.symbol || masterExisting?.symbol || uKey,
+          unique_key: masterExisting?.unique_key || uKey,
+          instrument: (row.instrument || masterExisting?.instrument || 'Stock') as 'Stock' | 'Option',
+          strategy_id: masterExisting?.strategy_id ?? null,
+          stock_entry_price: masterExisting?.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
           first_buy_date: row.date,
           status: isSell ? 'Closed' : 'Open',
-          weekend_trader_flag: false,
+          weekend_trader_flag: masterExisting?.weekend_trader_flag || false,
           account_id: row.account_id || defaultAccountId || null
         };
 
@@ -1309,8 +1269,8 @@ export async function resolveAndAssignTradesForTransactions(
         }
         tradesToUpsertMap.set(code, newTrade);
 
-        // SOLO compras nuevas de trades nuevos se envían a revisión en Step 2 Modal
-        if (isBuy) {
+        // SOLO compras nuevas de trades sin estrategia previa se envían a revisión en Step 2 Modal
+        if (isBuy && !masterExisting?.strategy_id) {
           newTradeCodes.add(code);
         }
       }
@@ -1422,10 +1382,16 @@ export async function syncTradesForCodes(
     }
 
     // Limpieza de trades huérfanos: si un trade_code ya no tiene ninguna transacción (ej: se borró el archivo)
+    // REGLA CRÍTICA DE PROTECCIÓN: NUNCA eliminar trades de la tabla 'trades' si el usuario ya les asignó
+    // estrategia (strategy_id) o precio de entrada (stock_entry_price), para preservar sus configuraciones ante rollbacks o re-subidas de CSV.
     const codesWithTxs = new Set(txsByCode.keys());
     const orphanCodes = uniqueCodes.filter(c => !codesWithTxs.has(c));
-    if (orphanCodes.length > 0) {
-      const { error: errDel } = await supabase.from('trades').delete().in('trade_code', orphanCodes);
+    const orphanCodesToDelete = orphanCodes.filter(c => {
+      const ex = existingMap.get(c);
+      return !ex || (ex.strategy_id === null && (ex.stock_entry_price === null || ex.stock_entry_price === 0));
+    });
+    if (orphanCodesToDelete.length > 0) {
+      const { error: errDel } = await supabase.from('trades').delete().in('trade_code', orphanCodesToDelete);
       if (errDel) {
         console.warn('[syncTradesForCodes] Error deleting orphan trades from trades table:', errDel.message);
       }
@@ -2076,8 +2042,8 @@ export async function getDashboardExecutiveSourceData(supabase: SupabaseClient):
 }
 
 
-// 34. Cargar todos los orígenes de datos requeridos por Portfolio Risk
-export async function getPortfolioRiskSourceData(supabase: SupabaseClient): Promise<{
+// 34. Cargar todos los orígenes de datos consolidados requeridos por Strategies Stops y Portfolio Risk
+export async function getConsolidatedTradingSourceData(supabase: SupabaseClient): Promise<{
   positions: Position[];
   transactions: Transaction[];
   mkTosQuotes: MkTosQuote[];
@@ -2148,6 +2114,8 @@ export async function getPortfolioRiskSourceData(supabase: SupabaseClient): Prom
     spyCloses: spyCloses || []
   };
 }
+
+export const getPortfolioRiskSourceData = getConsolidatedTradingSourceData;
 
 // 40. Obtener trades nuevos o afectados que requieren revisión y enriquecimiento (strategy / stock_entry_price)
 export async function getTradesForEnrichment(

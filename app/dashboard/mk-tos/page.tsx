@@ -1,10 +1,9 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import HistorialArchivosMkTos from '../../../components/HistorialArchivosMkTos'
 import MkTosTable from '../../../components/MkTosTable'
 import { getMkTosQuotes } from '../../../services/queries'
 import { formatearFecha } from '../../../lib/formatters'
+import { createClientSSR } from '../../../lib/supabaseServer'
 
 export const instant = false
 
@@ -23,18 +22,7 @@ export default async function MkTosPage({ searchParams }: Props) {
   const pageSize = Math.max(10, Math.min(200, parseInt(params?.pageSize || '50', 10)))
   const symbol = (params?.symbol || '').trim()
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-      },
-    }
-  )
+  const supabase = await createClientSSR()
 
   const { quotes, count, latestFileName, isFiltered } = await getMkTosQuotes(supabase, { page, pageSize, symbol })
   const statementDate = quotes.length > 0 ? quotes[0].quote_date : null;

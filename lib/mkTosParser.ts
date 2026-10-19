@@ -2,8 +2,6 @@
 
 import { normalizeNumber } from './formatters';
 
-export { normalizeNumber };
-
 export interface ParsedMkTosQuoteRow {
   quote_date: string;
   symbol: string;

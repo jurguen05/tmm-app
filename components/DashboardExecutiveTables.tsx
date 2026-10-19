@@ -9,6 +9,14 @@ import {
   Trade
 } from '../types'
 import { EXCLUDED_STRATEGIES } from '../lib/dashboardStatsCalculator'
+import { 
+  formatMoney, 
+  formatIntegerMoney, 
+  formatPct, 
+  formatR, 
+  formatRatio, 
+  parseNumberEsAR 
+} from '../lib/formatters'
 
 interface DashboardExecutiveTablesProps {
   initialData: ExecutiveDashboardData
@@ -16,86 +24,6 @@ interface DashboardExecutiveTablesProps {
   strategies: Strategy[]
   trades: Trade[]
   transactions: Transaction[]
-}
-
-/** Formateador de moneda con 2 decimales y separador de miles: 1.234,56 o -1.234,56 */
-export const formatMoney = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '0,00'
-  const isNeg = val < 0
-  const formatted = new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(Math.abs(val))
-  return isNeg ? `-${formatted}` : formatted
-}
-
-/** Formateador de moneda/número entero con separador de miles sin decimales: 17.380 o -1.235 */
-export const formatIntegerMoney = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '0'
-  const isNeg = val < 0
-  const rounded = Math.round(Math.abs(val))
-  const formatted = new Intl.NumberFormat('es-AR', {
-    maximumFractionDigits: 0
-  }).format(rounded)
-  return isNeg ? `-${formatted}` : formatted
-}
-
-
-/** Formateador de porcentaje: 12,34% */
-export const formatPct = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '0,00%'
-  const formatted = new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(val)
-  return `${formatted}%`
-}
-
-/** Formateador de múltiplos R: +0,35 R o -0,20 R */
-export const formatR = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '0,00 R'
-  const formatted = new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(val)
-  return val > 0 ? `+${formatted} R` : `${formatted} R`
-}
-
-/** Formateador de ratios numéricos simples: 2,15 */
-export const formatRatio = (val: number | null | undefined): string => {
-  if (val === null || val === undefined || isNaN(val)) return '0,00'
-  return new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(val)
-}
-
-/** Parsea un string en formato es-AR (17.379,61 o 17.380) a número float estándar */
-export const parseNumberEsAR = (val: string | number | null | undefined): number => {
-  if (val === null || val === undefined || val === '') return 0
-  if (typeof val === 'number') return isNaN(val) ? 0 : val
-  let str = String(val).trim()
-  if (str.includes(',') && str.includes('.')) {
-    str = str.replace(/\./g, '').replace(',', '.')
-  } else if (str.includes(',')) {
-    str = str.replace(',', '.')
-  } else if (str.includes('.')) {
-    if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
-      str = str.replace(/\./g, '')
-    }
-  }
-  const clean = str.replace(/[^0-9.-]+/g, '')
-  const num = parseFloat(clean)
-  return isNaN(num) ? 0 : num
-}
-
-/** Formateador entero con separadores de miles para formato es-AR sin decimales (ej: 17.380) */
-const formatThousands = (val: number | string): string => {
-  if (val === '' || val === null || val === undefined) return '0'
-  const num = typeof val === 'number' ? val : parseNumberEsAR(val)
-  return new Intl.NumberFormat('es-AR', {
-    maximumFractionDigits: 0
-  }).format(Math.round(num))
 }
 
 export default function DashboardExecutiveTables({

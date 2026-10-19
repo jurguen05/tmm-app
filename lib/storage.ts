@@ -1,102 +1,106 @@
+// lib/storage.ts
 import { supabase } from './supabase'
 
-// 1. SUBIR ARCHIVO (Ya la tenías, le agregamos upsert: true)
-export const subirArchivoOriginal = async (file: File, accountId: string) => {
+export type StorageBucket = 'Transactions' | 'Positions' | 'Mk-tos'
+
+export interface StorageOperationResult<T = any> {
+  exito: boolean
+  data?: T
+  error?: string
+}
+
+/**
+ * Operación genérica para subir un archivo a cualquier bucket de Supabase Storage.
+ * Aplica upsert: true para permitir reprocesamiento seguro.
+ */
+export async function uploadToStorage(
+  bucket: StorageBucket,
+  path: string,
+  file: File
+): Promise<StorageOperationResult> {
   try {
-    const filePath = `${accountId}/${file.name}`;
-    
+    const cleanPath = path.startsWith(`${bucket}/`) ? path.replace(`${bucket}/`, '') : path
     const { data, error } = await supabase.storage
-      .from('Transactions')
-      .upload(filePath, file, {
+      .from(bucket)
+      .upload(cleanPath, file, {
         cacheControl: '3600',
-        upsert: true // Permite sobreescribir si estamos reprocesando
-      });
+        upsert: true
+      })
 
-    if (error) throw error;
-    
-    return { exito: true, data };
+    if (error) throw error
+    return { exito: true, data }
   } catch (error: any) {
-    return { exito: false, error: error.message };
+    return { exito: false, error: error.message }
   }
-};
+}
 
-// 2. ELIMINAR ARCHIVO (Nueva: para cuando borres del historial)
-export const eliminarArchivoStorage = async (storagePath: string) => {
+/**
+ * Operación genérica para descargar un archivo de cualquier bucket de Supabase Storage.
+ */
+export async function downloadFromStorage(
+  bucket: StorageBucket,
+  path: string
+): Promise<StorageOperationResult<Blob>> {
   try {
-    // La base de datos guarda 'Transactions/ACC123/archivo.csv'
-    // Pero Supabase pide la ruta sin el nombre del bucket, así que lo limpiamos:
-    const rutaLimpia = storagePath.replace('Transactions/', '');
-    
-    const { error } = await supabase.storage
-      .from('Transactions')
-      .remove([rutaLimpia]);
-
-    if (error) throw error;
-    
-    return { exito: true };
-  } catch (error: any) {
-    return { exito: false, error: error.message };
-  }
-};
-
-// 3. DESCARGAR ARCHIVO (Nueva: para cuando quieras Reprocesar un archivo viejo)
-export const descargarArchivoStorage = async (storagePath: string) => {
-  try {
-    const rutaLimpia = storagePath.replace('Transactions/', '');
-    
+    const cleanPath = path.startsWith(`${bucket}/`) ? path.replace(`${bucket}/`, '') : path
     const { data, error } = await supabase.storage
-      .from('Transactions')
-      .download(rutaLimpia);
+      .from(bucket)
+      .download(cleanPath)
 
-    if (error) throw error;
-    
-    // Retorna el archivo como un Blob (datos crudos) listo para ser leído por PapaParse
-    return { exito: true, data }; 
+    if (error) throw error
+    return { exito: true, data: data as Blob }
   } catch (error: any) {
-    return { exito: false, error: error.message };
+    return { exito: false, error: error.message }
   }
-};
+}
 
-export const subirArchivoPositions = async (file: File, accountId: string) => {
-  const path = `${accountId}/${file.name}`;
-  const { data, error } = await supabase.storage.from('Positions').upload(path, file, {
-    upsert: true
-  });
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+/**
+ * Operación genérica para eliminar un archivo de cualquier bucket de Supabase Storage.
+ */
+export async function deleteFromStorage(
+  bucket: StorageBucket,
+  path: string
+): Promise<StorageOperationResult> {
+  try {
+    const cleanPath = path.startsWith(`${bucket}/`) ? path.replace(`${bucket}/`, '') : path
+    const { error } = await supabase.storage
+      .from(bucket)
+      .remove([cleanPath])
 
-export const descargarArchivoPositions = async (path: string) => {
-  const { data, error } = await supabase.storage.from('Positions').download(path);
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+    if (error) throw error
+    return { exito: true }
+  } catch (error: any) {
+    return { exito: false, error: error.message }
+  }
+}
 
-export const eliminarArchivoPositions = async (path: string) => {
-  const { data, error } = await supabase.storage.from('Positions').remove([path]);
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+// ============================================================================
+// Funciones de compatibilidad hacia atrás (delegadas a las funciones genéricas)
+// ============================================================================
 
-// ======== FUNCIONES PARA EL BUCKET Mk-tos ========
+export const subirArchivoOriginal = (file: File, accountId: string) =>
+  uploadToStorage('Transactions', `${accountId}/${file.name}`, file)
 
-export const subirArchivoMkTos = async (file: File, accountId: string) => {
-  const path = `${accountId}/${file.name}`;
-  const { data, error } = await supabase.storage.from('Mk-tos').upload(path, file, {
-    upsert: true
-  });
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+export const eliminarArchivoStorage = (storagePath: string) =>
+  deleteFromStorage('Transactions', storagePath)
 
-export const descargarArchivoMkTos = async (path: string) => {
-  const { data, error } = await supabase.storage.from('Mk-tos').download(path);
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+export const descargarArchivoStorage = (storagePath: string) =>
+  downloadFromStorage('Transactions', storagePath)
 
-export const eliminarArchivoMkTos = async (path: string) => {
-  const { data, error } = await supabase.storage.from('Mk-tos').remove([path]);
-  if (error) return { exito: false, error: error.message };
-  return { exito: true, data };
-};
+export const subirArchivoPositions = (file: File, accountId: string) =>
+  uploadToStorage('Positions', `${accountId}/${file.name}`, file)
+
+export const descargarArchivoPositions = (path: string) =>
+  downloadFromStorage('Positions', path)
+
+export const eliminarArchivoPositions = (path: string) =>
+  deleteFromStorage('Positions', path)
+
+export const subirArchivoMkTos = (file: File, accountId: string) =>
+  uploadToStorage('Mk-tos', `${accountId}/${file.name}`, file)
+
+export const descargarArchivoMkTos = (path: string) =>
+  downloadFromStorage('Mk-tos', path)
+
+export const eliminarArchivoMkTos = (path: string) =>
+  deleteFromStorage('Mk-tos', path)

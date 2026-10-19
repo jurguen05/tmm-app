@@ -1,27 +1,15 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { connection } from 'next/server'
 import { getUserProfile, getTransactions, getActiveStrategies } from '../../../services/queries'
 import HistorialArchivosTransactions from '../../../components/HistorialArchivosTransactions'
 import TransactionsTableClient from '../../../components/TransactionsTableClient'
 import { formatearFecha } from '../../../lib/formatters'
+import { createClientSSR } from '../../../lib/supabaseServer'
 
 export const instant = false
 
 export default async function TransactionsPage() {
   await connection()
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-      },
-    }
-  )
+  const supabase = await createClientSSR()
 
   // 1. Validar usuario en el servidor de forma segura
   const { data: { user } } = await supabase.auth.getUser()

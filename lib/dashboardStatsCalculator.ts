@@ -666,93 +666,14 @@ export const calcularAuditMetrics = (
 ): AuditMetricsSummary => {
   const { dictOpen, dictClosed } = calcularPnLDiccionarios(transactions, positions, trades);
 
-  let openWinCount = 0, openLoseCount = 0;
-  let closedWinCount = 0, closedLoseCount = 0;
-  let openWinnersVal = 0, openLosersVal = 0;
-  let closedWinnersVal = 0, closedLosersVal = 0;
-  let openPnL = 0, closedPnL = 0;
-
-  for (const valO of dictOpen.values()) {
-    openPnL += valO;
-    if (valO > 0) {
-      openWinCount++;
-      openWinnersVal += valO;
-    } else if (valO < 0) {
-      openLoseCount++;
-      openLosersVal += valO;
-    }
-  }
-
-  for (const valC of dictClosed.values()) {
-    closedPnL += valC;
-    if (valC > 0) {
-      closedWinCount++;
-      closedWinnersVal += valC;
-    } else if (valC < 0) {
-      closedLoseCount++;
-      closedLosersVal += valC;
-    }
-  }
-
-  const safeDiv = (num: number, den: number): number => (den === 0 ? 0 : num / den);
-
-  const OAWin = safeDiv(openWinnersVal, openWinCount);
-  const OALos = safeDiv(openLosersVal, openLoseCount);
-  const CAWin = safeDiv(closedWinnersVal, closedWinCount);
-  const CALos = safeDiv(closedLosersVal, closedLoseCount);
-
-  const wlOpen = safeDiv(OAWin, Math.abs(OALos));
-  const wlClosed = safeDiv(CAWin, Math.abs(CALos));
-
-  const totWinVal = openWinnersVal + closedWinnersVal;
-  const totWinCount = openWinCount + closedWinCount;
-  const totLosVal = openLosersVal + closedLosersVal;
-  const totLosCount = openLoseCount + closedLoseCount;
-
-  const avgWinOverall = safeDiv(totWinVal, totWinCount);
-  const avgLosOverall = safeDiv(totLosVal, totLosCount);
-  const wlOverall = safeDiv(avgWinOverall, Math.abs(avgLosOverall));
-
-  const wrClosedFrac = safeDiv(closedWinCount, closedWinCount + closedLoseCount);
-  const wrOpenFrac = safeDiv(openWinCount, openWinCount + openLoseCount);
-  const wrOverallFrac = safeDiv(totWinCount, totWinCount + totLosCount);
-
-  const wrClosedPct = wrClosedFrac * 100;
-  const wrOpenPct = wrOpenFrac * 100;
-  const wrOverallPct = wrOverallFrac * 100;
-
-  const expectancyClosed = (wlClosed * wrClosedFrac) - (1 - wrClosedFrac);
-  const expectancyOpen = (wlOpen * wrOpenFrac) - (1 - wrOpenFrac);
-  const expectancyOverall = (wlOverall * wrOverallFrac) - (1 - wrOverallFrac);
+  const closedList = Array.from(dictClosed.values());
+  const openList = Array.from(dictOpen.values());
+  const overallList = [...closedList, ...openList];
 
   return {
-    closed: {
-      averageWinner: Number(CAWin.toFixed(2)),
-      averageLoser: Number(CALos.toFixed(2)),
-      winLossRatio: Number(wlClosed.toFixed(2)),
-      winRatePct: Number(wrClosedPct.toFixed(2)),
-      expectancy: Number(expectancyClosed.toFixed(2)),
-      quantity: closedWinCount + closedLoseCount,
-      totalPnL: Number(closedPnL.toFixed(2))
-    },
-    open: {
-      averageWinner: Number(OAWin.toFixed(2)),
-      averageLoser: Number(OALos.toFixed(2)),
-      winLossRatio: Number(wlOpen.toFixed(2)),
-      winRatePct: Number(wrOpenPct.toFixed(2)),
-      expectancy: Number(expectancyOpen.toFixed(2)),
-      quantity: openWinCount + openLoseCount,
-      totalPnL: Number(openPnL.toFixed(2))
-    },
-    overall: {
-      averageWinner: Number(avgWinOverall.toFixed(2)),
-      averageLoser: Number(avgLosOverall.toFixed(2)),
-      winLossRatio: Number(wlOverall.toFixed(2)),
-      winRatePct: Number(wrOverallPct.toFixed(2)),
-      expectancy: Number(expectancyOverall.toFixed(2)),
-      quantity: totWinCount + totLosCount,
-      totalPnL: Number((closedPnL + openPnL).toFixed(2))
-    }
+    closed: calcularMetricasColumna(closedList),
+    open: calcularMetricasColumna(openList),
+    overall: calcularMetricasColumna(overallList)
   };
 };
 
@@ -817,6 +738,8 @@ export const calcularRiskMultiples = (
         let tradePnL = 0;
         if (tr?.realized_pnl !== null && tr?.realized_pnl !== undefined) {
           tradePnL = Number(tr.realized_pnl);
+        } else if (tr?.cash_flow !== null && tr?.cash_flow !== undefined) {
+          tradePnL = Number(tr.cash_flow);
         } else if (txs.length > 0) {
           tradePnL = txs.reduce((sum, t) => sum + (typeof t.amount === 'number' && !isNaN(t.amount) ? t.amount : 0), 0);
         }

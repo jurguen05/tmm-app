@@ -3,27 +3,8 @@
 import { useState, useTransition, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { formatearFecha } from '../lib/formatters';
+import { MkTosQuote } from '../types';
 import PaginationControls from './PaginationControls';
-
-interface MkTosQuote {
-  id: string;
-  quote_date: string;
-  symbol: string;
-  description: string;
-  last_price: number;
-  high_52: number;
-  low_52: number;
-  ema: number;
-  low_100_day: number;
-  high_price: number;
-  low_price: number;
-  bollinger_bands: number;
-  sma_10w: number;
-  mac_stop: number;
-  trendpilot_stop: number;
-  sma_10d: number;
-  sma_100d: number;
-}
 
 interface MkTosTableProps {
   quotes: MkTosQuote[];

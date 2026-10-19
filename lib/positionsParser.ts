@@ -2,8 +2,6 @@
 
 import { normalizeNumber } from './formatters';
 
-export { normalizeNumber };
-
 export interface ParsedPositionRow {
   statement_date: string;
   unique_key: string;
