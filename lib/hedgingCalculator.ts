@@ -156,10 +156,29 @@ export function calcularSpitznagelBudget(
     const netLiq = typeof pos.net_liq === 'number' && !isNaN(pos.net_liq) ? pos.net_liq : 0;
     totalEquity += netLiq;
 
-    // Suma del valor de mercado de acciones y calls activas (long stock & calls)
+    // Cálculo del capital en riesgo de mercado (Exposición nocional y delta-ajustada):
+    // 1. Acciones (Stock): Precio x Cantidad
+    // 2. Opciones CALL: Precio x Cantidad x 100 x Option Delta
     const tipo = clasificarTipoInstrumento(pos.unique_key);
-    if (tipo === 'Stock' || tipo === 'CALL') {
-      positionsValue += netLiq;
+    const qty = Math.abs(pos.quantity || 0);
+    const px = (pos.stock_last && pos.stock_last > 0)
+      ? pos.stock_last
+      : ((pos.stock_mark && pos.stock_mark > 0) ? pos.stock_mark : (pos.trade_price || 0));
+
+    if (tipo === 'Stock') {
+      const stockExposure = (px > 0 && qty > 0) ? (px * qty) : netLiq;
+      positionsValue += stockExposure;
+    } else if (tipo === 'CALL') {
+      // Delta de la opción (de option_delta o delta_position / (qty * 100))
+      let callDelta = typeof pos.option_delta === 'number' && !isNaN(pos.option_delta) ? Math.abs(pos.option_delta) : 0;
+      if (callDelta === 0 && pos.delta_position && qty > 0) {
+        callDelta = Math.abs(pos.delta_position) / (qty * 100);
+      }
+      // Si delta no está disponible, fallback al net_liq
+      const callExposure = (px > 0 && qty > 0 && callDelta > 0)
+        ? (px * qty * 100 * callDelta)
+        : netLiq;
+      positionsValue += callExposure;
     }
   }
 
