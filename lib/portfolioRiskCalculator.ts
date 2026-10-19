@@ -102,7 +102,28 @@ export function calcularPortfolioRisk(
 
     // Stop Price
     let stopPrice = 0;
-    if (typeof cItem?.stopValue === 'number' && !isNaN(cItem.stopValue) && cItem.stopValue > 0) {
+    const isMACStrategy = normStrategy.includes('mac');
+    const isTrendPilotStrategy = normStrategy.includes('pilot') || normStrategy.includes('trend');
+
+    if (isMACStrategy) {
+      // Regla de simulación MAC (MACD):
+      // Si ya está en rojo (Signal >= 3), salta de inmediato (distancia 0)
+      if (cItem?.isStopRed) {
+        stopPrice = currentPrice;
+      } else {
+        // En simulación de caída generalizada, el corte técnico de MAC salta al -15%
+        stopPrice = currentPrice > 0 ? Number((currentPrice * 0.85).toFixed(4)) : 0;
+      }
+    } else if (isTrendPilotStrategy) {
+      // Regla de simulación Trend Pilot:
+      // Si ya está en rojo (Signal >= 3), salta de inmediato (distancia 0)
+      if (cItem?.isStopRed) {
+        stopPrice = currentPrice;
+      } else {
+        // En simulación de caída generalizada, el umbral estadístico de quiebre de tendencia salta al -20%
+        stopPrice = currentPrice > 0 ? Number((currentPrice * 0.80).toFixed(4)) : 0;
+      }
+    } else if (typeof cItem?.stopValue === 'number' && !isNaN(cItem.stopValue) && cItem.stopValue > 0) {
       stopPrice = cItem.stopValue;
     } else if (typeof cItem?.stop === 'number' && !isNaN(cItem.stop) && cItem.stop > 0) {
       stopPrice = cItem.stop;
@@ -129,7 +150,7 @@ export function calcularPortfolioRisk(
       distancePct = (currentPrice - stopPrice) / currentPrice;
 
       if (currentPrice <= stopPrice) {
-        // Stop ya cruzado: el riesgo es el 100% de la distancia o pérdida actual
+        // Stop ya cruzado o señal activa: el riesgo es inmediato
         scenarioLoss = positionAmount * Math.abs(distancePct);
       } else {
         scenarioLoss = positionAmount * (1 - (stopPrice / currentPrice));
