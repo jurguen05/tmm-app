@@ -355,7 +355,14 @@ export interface SpitznagelBudget {
   monthlyExposureBudget: number;
   totalAnnualBudget: number;
   totalMonthlyBudget: number;
-  monthlyTrancheBudget: number; // 50% del presupuesto mensual para cada tranche/escalera
+  monthlyTrancheBudget: number; // Promedio por tranche
+  // Arquitectura 3-Tranche Spitznagel Ladder (30% / 40% / 30%):
+  trancheABudgetMonthly: number; // 30% del presupuesto mensual (Tranche A: 30 DTE inicial -> roll a 180 DTE)
+  trancheBBudgetMonthly: number; // 40% del presupuesto mensual (Tranche B: 90 DTE inicial -> roll a 180 DTE)
+  trancheCBudgetMonthly: number; // 30% del presupuesto mensual (Tranche C: 180 DTE inicial -> roll a 180 DTE)
+  trancheABudgetAnnual: number;
+  trancheBBudgetAnnual: number;
+  trancheCBudgetAnnual: number;
   totalHedgePct: number;
 }
 

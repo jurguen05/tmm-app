@@ -179,10 +179,20 @@ export function calcularSpitznagelBudget(
   const annualExposureBudget = isLayer2Active ? totalEquity * (excessUnits * 0.004) : 0;
   const monthlyExposureBudget = annualExposureBudget / 12;
 
-  // Presupuesto Total y División por Tranche / Escalera (50% cada tranche)
+  // Presupuesto Total y División por Tranche / Escalera (30% / 40% / 30%)
   const totalAnnualBudget = annualBaseBudget + annualExposureBudget;
   const totalMonthlyBudget = totalAnnualBudget / 12;
-  const monthlyTrancheBudget = totalMonthlyBudget / 2;
+  const monthlyTrancheBudget = totalMonthlyBudget / 3;
+
+  // Asignación 30 / 40 / 30 del modelo de rotación Spitznagel:
+  const trancheABudgetMonthly = totalMonthlyBudget * 0.30;
+  const trancheBBudgetMonthly = totalMonthlyBudget * 0.40;
+  const trancheCBudgetMonthly = totalMonthlyBudget * 0.30;
+
+  const trancheABudgetAnnual = totalAnnualBudget * 0.30;
+  const trancheBBudgetAnnual = totalAnnualBudget * 0.40;
+  const trancheCBudgetAnnual = totalAnnualBudget * 0.30;
+
   const totalHedgePct = totalEquity > 0 ? totalAnnualBudget / totalEquity : 0;
 
   // QQQ Spot y Target Strike (30% OTM = 70% del spot)
@@ -208,6 +218,12 @@ export function calcularSpitznagelBudget(
     totalAnnualBudget: Number(totalAnnualBudget.toFixed(2)),
     totalMonthlyBudget: Number(totalMonthlyBudget.toFixed(2)),
     monthlyTrancheBudget: Number(monthlyTrancheBudget.toFixed(2)),
+    trancheABudgetMonthly: Number(trancheABudgetMonthly.toFixed(2)),
+    trancheBBudgetMonthly: Number(trancheBBudgetMonthly.toFixed(2)),
+    trancheCBudgetMonthly: Number(trancheCBudgetMonthly.toFixed(2)),
+    trancheABudgetAnnual: Number(trancheABudgetAnnual.toFixed(2)),
+    trancheBBudgetAnnual: Number(trancheBBudgetAnnual.toFixed(2)),
+    trancheCBudgetAnnual: Number(trancheCBudgetAnnual.toFixed(2)),
     totalHedgePct: Number(totalHedgePct.toFixed(4))
   };
 }
