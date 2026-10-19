@@ -255,6 +255,8 @@ export interface PositionRiskItem {
   scenarioLoss: number;
   pctOfStrategy: number;
   pctOfPortfolio: number;
+  needsReview?: boolean;
+  reviewReason?: string;
 }
 
 export interface StrategyRiskSummary {
@@ -403,12 +405,22 @@ export interface MarianShieldStep {
   totalHedgeValue: number;
 }
 
+export interface HedgingReviewItem {
+  trade_code: string;
+  symbol: string;
+  strategy: string;
+  positionAmount: number;
+  reason?: string;
+}
+
 export interface HedgingDashboardData {
   budget: SpitznagelBudget;
   hedgeContracts: HedgeContractItem[];
   totalHedgeValue: number;
   baselineIV: number;
   marianShieldSteps: MarianShieldStep[];
+  reviewCount: number;
+  pendingReviews: HedgingReviewItem[];
 }
 
 

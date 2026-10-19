@@ -75,6 +75,8 @@ export function calcularPortfolioRisk(
     distancePct: number;
     positionAmount: number;
     scenarioLoss: number;
+    needsReview?: boolean;
+    reviewReason?: string;
   }
 
   const rawItems: RawRiskItem[] = [];
@@ -156,10 +158,13 @@ export function calcularPortfolioRisk(
         scenarioLoss = positionAmount * (1 - (stopPrice / currentPrice));
       }
     } else {
-      // Sin stop válido
+      // Sin stop válido (Review)
       scenarioLoss = 0;
       distancePct = 1; // Sin stop definido, no salta automáticamente
     }
+
+    const needsReview = cItem?.needsReview ?? (stopPrice === 0);
+    const reviewReason = cItem?.reviewReason || (stopPrice === 0 ? 'Missing quote or stop formula in MK-TOS' : undefined);
 
     rawItems.push({
       id,
@@ -170,7 +175,9 @@ export function calcularPortfolioRisk(
       stopPrice,
       distancePct,
       positionAmount,
-      scenarioLoss
+      scenarioLoss,
+      needsReview,
+      reviewReason
     });
   }
 
@@ -213,7 +220,9 @@ export function calcularPortfolioRisk(
       positionAmount: Number(item.positionAmount.toFixed(2)),
       scenarioLoss: Number(item.scenarioLoss.toFixed(2)),
       pctOfStrategy,
-      pctOfPortfolio
+      pctOfPortfolio,
+      needsReview: item.needsReview,
+      reviewReason: item.reviewReason
     };
   });
 

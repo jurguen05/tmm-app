@@ -482,11 +482,33 @@ export function calcularHedgingModule(
     baselineIV
   );
 
+  // 4. Auditoría de posiciones en Review (sin cotización en MK-TOS o sin stop calculado)
+  const portfolioRisk = calcularPortfolioRisk(
+    positions,
+    transactions,
+    mkTosQuotes,
+    trades,
+    strategies,
+    spyCloses
+  );
+
+  const pendingReviews = portfolioRisk.positions
+    .filter(p => p.needsReview || p.stopPrice === 0)
+    .map(p => ({
+      trade_code: p.trade_code,
+      symbol: p.symbol,
+      strategy: p.strategy,
+      positionAmount: p.positionAmount,
+      reason: p.reviewReason || 'Missing MK-TOS quote or stop formula'
+    }));
+
   return {
     budget,
     hedgeContracts,
     totalHedgeValue: Number(totalHedgeValue.toFixed(2)),
     baselineIV,
-    marianShieldSteps
+    marianShieldSteps,
+    reviewCount: pendingReviews.length,
+    pendingReviews
   };
 }

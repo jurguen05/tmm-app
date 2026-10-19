@@ -130,11 +130,13 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
       hedgeContracts: contracts,
       totalHedgeValue: Number(currentHedgeMarketValue.toFixed(2)),
       baselineIV,
-      marianShieldSteps: steps
+      marianShieldSteps: steps,
+      reviewCount: initialData.reviewCount || 0,
+      pendingReviews: initialData.pendingReviews || []
     }
   }, [initialData, baselineIV, manualQqqPrice])
 
-  const { budget, hedgeContracts, totalHedgeValue, marianShieldSteps } = dashboardData
+  const { budget, hedgeContracts, totalHedgeValue, marianShieldSteps, reviewCount, pendingReviews } = dashboardData
 
   // Cálculo de protección máxima
   const maxDropStep = marianShieldSteps[marianShieldSteps.length - 1] // -50%
@@ -537,6 +539,48 @@ export default function HedgingDashboard({ initialData }: HedgingDashboardProps)
             </span>
           </div>
         </div>
+
+        {/* Warning Banner: Review Needed Disclosure */}
+        {reviewCount > 0 && (
+          <div className="mx-6 mt-6 p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-900">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl mt-0.5">⚠️</span>
+              <div className="flex-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold tracking-tight">
+                    Review Needed: {reviewCount} Active {reviewCount === 1 ? 'Position' : 'Positions'} Missing MK-TOS Quotes
+                  </h4>
+                  <a
+                    href="/dashboard/mk-tos"
+                    className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300/90 px-2.5 py-1 rounded-lg transition-colors border border-amber-400 self-start sm:self-auto"
+                  >
+                    Upload MK-TOS Quotes →
+                  </a>
+                </div>
+                <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                  The Marian Shield requires verified trailing stops from MK-TOS to simulate exact cascade exits. 
+                  Currently, <strong>{reviewCount} {reviewCount === 1 ? 'position lacks' : 'positions lack'}</strong> an active stop calculation and remain listed under <code className="px-1 py-0.5 rounded bg-amber-100 font-bold">EXPOSED STOCKS</code> until resolved.
+                </p>
+
+                {/* List of Pending Reviews */}
+                <div className="mt-3 pt-3 border-t border-amber-200/60 flex flex-wrap gap-2">
+                  {pendingReviews.map((item, idx) => (
+                    <span
+                      key={`${item.trade_code}-${item.symbol}-${idx}`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-amber-300 text-xs font-mono font-medium text-amber-900 shadow-2xs"
+                    >
+                      <strong className="font-bold">{item.symbol}</strong>
+                      <span className="text-gray-400">|</span>
+                      <span className="text-gray-600 font-sans text-[11px]">{item.strategy}</span>
+                      <span className="text-gray-400">|</span>
+                      <span className="text-emerald-700 font-bold">{formatMoney(item.positionAmount)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Visual Drawdown Comparison Chart */}
         <div className="p-6 bg-gray-50/50 border-b border-gray-100">
