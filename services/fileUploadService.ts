@@ -28,12 +28,13 @@ import {
   resolveAndAssignTradesForTransactions,
   syncTradesForCodes,
   reconcileAllTradesStatus,
-  backfillClosedTradesExitMetricsFromMkTos
+  backfillClosedTradesExitMetricsFromMkTos,
+  flagOpenWeekendTraderTradesIfSpyRed
 } from './queries';
 import { procesarFilasPosiciones } from '../lib/positionsParser';
 import { procesarFilasTransacciones, limpiarTextoCsv, extraerAccountIdDesdeNombre } from '../lib/transactionsParser';
 import { procesarFilasMkTos } from '../lib/mkTosParser';
-import { parsearFechaTOS } from '../lib/formatters';
+import { parsearFechaTOS, esCierreSemanal } from '../lib/formatters';
 
 export interface IngestionResult {
   success: boolean;
@@ -405,6 +406,15 @@ export async function processMkTosUpload(file: File, supabase: any): Promise<Ing
                 spy_sma_10w: spyRow.sma_10w,
                 file_upload_id: fileRecord.id
               });
+
+              // Si es cierre semanal (viernes o jueves feriado) y SPY está en rojo (Last <= SMA 10W),
+              // activar de inmediato el flag irreversible en todos los trades abiertos de Weekend Trader
+              const isRed = spyRow.last_price <= spyRow.sma_10w;
+              const isWeekly = esCierreSemanal(spyRow.quote_date);
+              if (isRed && isWeekly) {
+                const flaggedCount = await flagOpenWeekendTraderTradesIfSpyRed(supabase, spyRow.quote_date);
+                console.log(`[processMkTosUpload] Market filter is RED for weekly close ${spyRow.quote_date}. Flagged ${flaggedCount} open Weekend Trader trades.`);
+              }
             } catch (spyErr: any) {
               console.warn('[processMkTosUpload] Could not save SPY daily close:', spyErr.message);
               spyWarning = ' (Warning: SPY market filter history was not saved)';

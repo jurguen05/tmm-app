@@ -11,11 +11,12 @@ interface PositionsTableProps {
 
 type SortField = 'none' | 'days' | 'symbol' | 'net_liq' | 'quantity'
 type SortDirection = 'asc' | 'desc'
-type ExpirationFilter = 'all' | 'with_expiration' | 'no_expiration' | '0_30' | '31_60' | '60_plus'
+type PositionTypeFilter = 'all' | 'options' | 'stocks'
 
 export default function PositionsTable({ posiciones }: PositionsTableProps) {
   const [busqueda, setBusqueda] = useState('')
-  const [filtroDays, setFiltroDays] = useState<ExpirationFilter>('all')
+  const [tipoPosicion, setTipoPosicion] = useState<PositionTypeFilter>('all')
+  const [maxDays, setMaxDays] = useState<string>('')
   const [sortField, setSortField] = useState<SortField>('none')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [paginaActual, setPaginaActual] = useState(1)
@@ -70,23 +71,23 @@ export default function PositionsTable({ posiciones }: PositionsTableProps) {
         if (!matchSymbol && !matchKey) return false
       }
 
-      // Filtro por vencimiento / Days
+      // Filtro por tipo de instrumento y días de vencimiento
       const days = p.days ?? 0
-      if (filtroDays === 'with_expiration') {
-        if (days <= 0) return false
-      } else if (filtroDays === 'no_expiration') {
-        if (days > 0) return false
-      } else if (filtroDays === '0_30') {
-        if (days <= 0 || days > 30) return false
-      } else if (filtroDays === '31_60') {
-        if (days < 31 || days > 60) return false
-      } else if (filtroDays === '60_plus') {
-        if (days <= 60) return false
+      const isOption = days > 0
+
+      if (tipoPosicion === 'options' && !isOption) return false
+      if (tipoPosicion === 'stocks' && isOption) return false
+
+      if (maxDays.trim()) {
+        const limit = parseInt(maxDays.trim(), 10)
+        if (!isNaN(limit)) {
+          if (days <= 0 || days > limit) return false
+        }
       }
 
       return true
     })
-  }, [posiciones, busqueda, filtroDays])
+  }, [posiciones, busqueda, tipoPosicion, maxDays])
 
   // 2. Ordenamiento
   const posicionesOrdenadas = useMemo(() => {
@@ -137,11 +138,12 @@ export default function PositionsTable({ posiciones }: PositionsTableProps) {
     setPaginaActual(1)
   }
 
-  const hayFiltrosActivos = busqueda.trim() !== '' || filtroDays !== 'all' || sortField !== 'none'
+  const hayFiltrosActivos = busqueda.trim() !== '' || tipoPosicion !== 'all' || maxDays.trim() !== '' || sortField !== 'none'
 
   const handleLimpiarFiltros = () => {
     setBusqueda('')
-    setFiltroDays('all')
+    setTipoPosicion('all')
+    setMaxDays('')
     setSortField('none')
     setSortDirection('asc')
     setPaginaActual(1)
@@ -178,24 +180,52 @@ export default function PositionsTable({ posiciones }: PositionsTableProps) {
             />
           </div>
 
-          {/* Filtro por Days / Vencimiento */}
+          {/* Tipo de Instrumento */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Expiration (Days)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
             <select
-              value={filtroDays}
+              value={tipoPosicion}
               onChange={(e) => {
-                setFiltroDays(e.target.value as ExpirationFilter)
+                setTipoPosicion(e.target.value as PositionTypeFilter)
                 setPaginaActual(1)
               }}
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 bg-white"
             >
               <option value="all">All Positions</option>
-              <option value="with_expiration">With Expiration (Options)</option>
-              <option value="no_expiration">Without Expiration (Stocks)</option>
-              <option value="0_30">0 - 30 Days (Expiring soon)</option>
-              <option value="31_60">31 - 60 Days</option>
-              <option value="60_plus">&gt; 60 Days</option>
+              <option value="options">Options Only</option>
+              <option value="stocks">Stocks Only</option>
             </select>
+          </div>
+
+          {/* Filtro por Días al Vencimiento (≤ Días) */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Expiration ≤ (Days)</label>
+            <div className="relative">
+              <input
+                type="number"
+                min="1"
+                placeholder="e.g. 110"
+                value={maxDays}
+                onChange={(e) => {
+                  setMaxDays(e.target.value)
+                  setPaginaActual(1)
+                }}
+                className="px-3 py-1.5 pr-7 border border-gray-300 rounded-md text-sm focus:ring-1 focus:ring-indigo-500 w-32"
+              />
+              {maxDays && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMaxDays('')
+                    setPaginaActual(1)
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs cursor-pointer font-bold"
+                  title="Clear"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Selector de Orden */}

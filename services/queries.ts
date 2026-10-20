@@ -1771,6 +1771,40 @@ export async function updateTradesMaxStockPrices(
   return failed;
 }
 
+// 30c. Activar irreversiblemente el flag de Weekend Trader en trades abiertos tras un cierre semanal rojo de SPY
+export async function flagOpenWeekendTraderTradesIfSpyRed(
+  supabase: SupabaseClient,
+  quoteDate: string
+): Promise<number> {
+  if (!quoteDate) return 0;
+  try {
+    const { data: strats, error: stratErr } = await supabase
+      .from('strategies')
+      .select('id')
+      .ilike('name', '%weekend%');
+
+    if (stratErr || !strats || strats.length === 0) return 0;
+    const stratIds = (strats as { id: number }[]).map((s: { id: number }) => s.id);
+
+    const { data, error } = await supabase
+      .from('trades')
+      .update({ weekend_trader_flag: true })
+      .in('strategy_id', stratIds)
+      .eq('status', 'Open')
+      .or(`first_buy_date.is.null,first_buy_date.lte.${quoteDate}`)
+      .select('trade_code');
+
+    if (error) {
+      console.warn('[flagOpenWeekendTraderTradesIfSpyRed] Error updating trades:', error.message);
+      return 0;
+    }
+    return data ? data.length : 0;
+  } catch (err: unknown) {
+    console.warn('[flagOpenWeekendTraderTradesIfSpyRed] Note/Error:', err instanceof Error ? err.message : String(err));
+    return 0;
+  }
+}
+
 // 30. Actualizar permanentemente weekend_trader_flag a true para trades abiertos
 export async function updateTradesWeekendTraderFlags(
   supabase: SupabaseClient,
