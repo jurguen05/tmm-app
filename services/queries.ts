@@ -2332,3 +2332,34 @@ export async function batchUpdateTradesEnrichment(
 
 
 
+
+
+// 52. Obtener trades cerrados con inversión y P&L válidos para simulación de Monte Carlo
+export async function getClosedTradesForMonteCarlo(supabase: SupabaseClient): Promise<Trade[]> {
+  const pageSize = 1000;
+  const closedTrades: Trade[] = [];
+  let page = 0;
+
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from('trades')
+      .select('id, trade_code, symbol, unique_key, instrument, status, realized_pnl, cash_flow, initial_investment, closed_date, first_buy_date')
+      .eq('status', 'Closed')
+      .order('closed_date', { ascending: true, nullsFirst: false })
+      .order('trade_code', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.warn('[getClosedTradesForMonteCarlo] Error:', error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    closedTrades.push(...data);
+    if (data.length < pageSize) break;
+    page++;
+  }
+
+  return closedTrades;
+}

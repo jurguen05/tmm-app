@@ -424,3 +424,68 @@ export interface HedgingDashboardData {
 }
 
 
+
+
+// ==========================================
+// MONTE CARLO SIMULATION & OPTIMAL F TYPES
+// ==========================================
+
+export interface MonteCarloParams {
+  startingEquity: number;
+  simulationsCount: number;
+  tradesPerPath: number;
+  ruinThresholdPct: number;
+  minF: number;
+  maxF: number;
+  fSteps?: number;
+  feeBps?: number;
+  slippageBps?: number;
+  tradesPerYear?: number;
+  seed?: number;
+  simulationF?: number;
+}
+
+export interface OptimalFPoint {
+  f: number;
+  medianCagr: number;
+  medianFinalEquity: number;
+  probRuin: number;
+}
+
+export interface MonteCarloPercentilePoint {
+  tradeIndex: number;
+  p5: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+}
+
+export interface MonteCarloTradeReturn {
+  tradeCode: number;
+  symbol: string;
+  realizedPnl: number;
+  initialInvestment: number;
+  returnPct: number;
+  closedDate: string | null;
+}
+
+export interface MonteCarloResult {
+  optimalF: number;
+  peakCagr: number;
+  optimalRuinProb: number;
+  expectedMaxDrawdown95: number;
+  medianMaxDrawdown: number;
+  medianFinalEquity: number;
+  optimalFPoints: OptimalFPoint[];
+  percentileCurves: MonteCarloPercentilePoint[];
+  totalTrades: number;
+  winRate: number;
+  avgWin: number;
+  avgLoss: number;
+  winLossRatio: number;
+  expectancy: number;
+  profitFactor: number;
+  activeF: number;
+  params: MonteCarloParams;
+}
