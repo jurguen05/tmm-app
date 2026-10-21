@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import QuickUploadModal from '../../components/QuickUploadModal'
+import ConsistencyAlertBadge from '../../components/ConsistencyAlertBadge'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -248,9 +249,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* ÁREA DE CONTENIDO PRINCIPAL */}
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-gray-50">
+        {/* TOP NAVBAR HEADER */}
+        <header className="h-14 bg-white/90 backdrop-blur-sm border-b border-gray-200/80 px-8 flex items-center justify-between flex-shrink-0 z-10">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-semibold tracking-wider text-gray-400 uppercase">TMM System</span>
+            <span className="text-gray-300">/</span>
+            <span className="text-sm font-semibold text-gray-700 capitalize">
+              {pathname === '/dashboard' ? 'Overview' : pathname?.replace('/dashboard/', '').replace(/-/g, ' ')}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <ConsistencyAlertBadge />
+            <button
+              onClick={() => setModalAbierto(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-sm shadow-indigo-600/20 transition-all cursor-pointer"
+            >
+              <span className="font-bold">+</span>
+              <span>Upload CSVs</span>
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto">
+          {children}
+        </main>
+      </div>
 
       {/* MODAL DE CARGA RÁPIDA DE CSVs */}
       <QuickUploadModal 

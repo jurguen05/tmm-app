@@ -1,11 +1,12 @@
 // services/queries.ts
 
-import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem } from '../types';
+import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem, ConsistencyAuditResult } from '../types';
 import { calcularEstadoTradeDesdeTransacciones, calcularCurrentQuantityDesdeTransacciones, calcularDeltaQuantity } from '../lib/transactionsParser';
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia, normalizeUniqueKey } from '../lib/formatters';
 import { seleccionarArchivosMkTosParaArchivar, MK_TOS_ACTIVE_QUOTE_DATES } from '../lib/archivePolicy';
 import { calculateStrategyExitMetrics } from '../lib/strategiesCalculator';
+import { auditPortfolioConsistency } from '../lib/consistencyChecker';
 
 export { calculateStrategyExitMetrics };
 
@@ -2362,4 +2363,19 @@ export async function getClosedTradesForMonteCarlo(supabase: SupabaseClient): Pr
   }
 
   return closedTrades;
+}
+
+// ==============================================================================
+// PORTFOLIO CONSISTENCY AUDIT
+// ==============================================================================
+export async function getPortfolioConsistencyAudit(supabase: SupabaseClient): Promise<ConsistencyAuditResult> {
+  const sourceData = await getConsolidatedTradingSourceData(supabase);
+  return auditPortfolioConsistency({
+    positions: sourceData.positions,
+    transactions: sourceData.transactions,
+    trades: sourceData.trades,
+    strategies: sourceData.strategies,
+    mkTosQuotes: sourceData.mkTosQuotes,
+    spyCloses: sourceData.spyCloses
+  });
 }

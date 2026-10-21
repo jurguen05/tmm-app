@@ -155,6 +155,45 @@ export interface ConsolidatedStrategyStop {
 }
 
 // ==========================================
+// PORTFOLIO CONSISTENCY & AUDIT TYPES
+// ==========================================
+
+export type ConsistencySeverity = 'red' | 'yellow';
+
+export type ConsistencyIssueType =
+  | 'GHOST_OPEN_TRADE'
+  | 'ORPHAN_POSITION'
+  | 'QUANTITY_MISMATCH'
+  | 'MISSING_STRATEGY'
+  | 'MISSING_MKTOS_QUOTE';
+
+export interface ConsistencyIssue {
+  id: string;
+  type: ConsistencyIssueType;
+  severity: ConsistencySeverity;
+  trade_code?: number | null;
+  symbol: string;
+  unique_key?: string;
+  instrument?: 'Stock' | 'Option';
+  title: string;
+  description: string;
+  impact: string;
+  suggestedAction: string;
+  positionQuantity?: number;
+  tradeQuantity?: number;
+}
+
+export interface ConsistencyAuditResult {
+  hasIssues: boolean;
+  maxSeverity: ConsistencySeverity | null;
+  redCount: number;
+  yellowCount: number;
+  totalCount: number;
+  issues: ConsistencyIssue[];
+  auditedAt: string;
+}
+
+// ==========================================
 // EXECUTIVE DASHBOARD TYPES
 // ==========================================
 

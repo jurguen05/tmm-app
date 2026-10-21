@@ -204,8 +204,11 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
       return
     }
 
-    if (algunExito) {
+        if (algunExito) {
       console.log('%c[QuickUploadModal] router.refresh() triggered after upload (no enrichment needed)', 'color: #8b5cf6; font-weight: bold;')
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tmm:portfolio-data-changed'))
+      }
       router.refresh()
     }
 
@@ -269,6 +272,9 @@ export default function QuickUploadModal({ isOpen, onClose }: QuickUploadModalPr
           onClose()
         }}
         onSaved={() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('tmm:portfolio-data-changed'))
+          }
           resetAll()
           onClose()
         }}
