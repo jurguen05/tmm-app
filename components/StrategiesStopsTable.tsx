@@ -50,10 +50,6 @@ export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
     return datos.filter(d => Boolean(d.isStopRed)).length;
   }, [datos]);
 
-  const reviewStopsCount = useMemo(() => {
-    return datos.filter(d => Boolean(d.needsReview || d.stop === 'Review' || d.stop === '-')).length;
-  }, [datos]);
-
   const datosFiltrados = useMemo(() => {
     return datos.filter(d => {
       const matchCode = !filtros.trade_code.trim() || 
@@ -63,8 +59,7 @@ export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
       const matchStrategy = !filtros.strategy.trim() || 
         (d.strategy && d.strategy.toLowerCase() === filtros.strategy.toLowerCase());
       const matchStopAlert = !filtros.stopAlert || 
-        (filtros.stopAlert === 'red' && Boolean(d.isStopRed)) ||
-        (filtros.stopAlert === 'review' && Boolean(d.needsReview || d.stop === 'Review' || d.stop === '-'));
+        (filtros.stopAlert === 'red' && Boolean(d.isStopRed));
       return matchCode && matchSymbol && matchStrategy && matchStopAlert;
     });
   }, [datos, filtros])
@@ -155,22 +150,7 @@ export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
             <span>{filtros.stopAlert === 'red' ? 'Showing Red Stops' : `Red Stops (${redStopsCount})`}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setFiltros(prev => ({ ...prev, stopAlert: prev.stopAlert === 'review' ? '' : 'review' }));
-              setPaginaActual(1);
-            }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold border transition-all cursor-pointer ${
-              filtros.stopAlert === 'review'
-                ? 'bg-amber-500 text-white border-amber-600 shadow-sm ring-2 ring-amber-300'
-                : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
-            }`}
-            title="Filter rows needing Review (missing quotes in MK-TOS)"
-          >
-            <span>⚠️</span>
-            <span>{filtros.stopAlert === 'review' ? 'Showing Review' : `Review (${reviewStopsCount})`}</span>
-          </button>
+
 
           {hayFiltrosActivos && (
             <button
@@ -222,22 +202,15 @@ export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
                   <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                     {filtros.stopAlert === 'red'
                       ? 'No positions currently have triggered red stops.'
-                      : filtros.stopAlert === 'review'
-                      ? 'No positions currently require review.'
                       : 'No positions match the applied filters.'}
                   </td>
                 </tr>
               ) : (
                 datosPaginados.map((fila) => {
-                  const isReview = Boolean(fila.needsReview || fila.stop === 'Review' || fila.stop === '-');
                   return (
                     <tr 
                       key={fila.id} 
-                      className={`transition-colors ${
-                        isReview 
-                          ? 'bg-amber-50 hover:bg-amber-100 border-l-4 border-l-amber-400' 
-                          : 'hover:bg-gray-50'
-                      }`}
+                      className="transition-colors hover:bg-gray-50 border-b border-gray-100"
                     >
                       <td className="px-4 py-3 text-center font-medium text-gray-600 whitespace-nowrap">{fila.trade_code}</td>
                       <td className="px-4 py-3 text-center font-bold text-gray-900 whitespace-nowrap">{fila.symbol}</td>
@@ -266,30 +239,21 @@ export default function StrategiesStopsTable({ datos, cargando }: TableProps) {
                       <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap text-xs">
                         {fila.max_stock_price_date ? formatearFecha(fila.max_stock_price_date) : '-'}
                       </td>
-                      <td className={`px-4 py-3 text-right whitespace-nowrap transition-colors ${
-                        isReview ? 'bg-amber-100/80 border-y border-amber-300' : ''
-                      }`}>
-                        {isReview ? (
-                          <span 
-                            title={fila.reviewReason || "Requires review: unconfigured strategy, missing quote, or missing metric in MK-TOS."}
-                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-bold bg-amber-200 text-amber-900 border border-amber-400 shadow-xs"
-                          >
-                            <span>⚠️</span> Review
-                          </span>
-                        ) : fila.isStopRed ? (
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        {fila.isStopRed ? (
                           <span 
                             title="Stop Alert: Triggered / Active"
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300"
+                            className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-800 border border-red-300 shadow-xs"
                           >
                             {typeof fila.stop === 'number' ? formatoMoneda(fila.stop) : fila.stop}
                           </span>
-                        ) : typeof fila.stop === 'number' ? (
+                        ) : typeof fila.stop === 'number' && !isNaN(fila.stop) && fila.stop > 0 ? (
                           <span className="font-semibold text-gray-900">
                             {formatoMoneda(fila.stop)}
                           </span>
                         ) : (
-                          <span className="text-gray-400 italic">
-                            {fila.stop}
+                          <span className="text-gray-400 font-normal">
+                            -
                           </span>
                         )}
                       </td>
