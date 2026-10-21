@@ -23,7 +23,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   const router = useRouter()
 
   const [transacciones, setTransacciones] = useState<Transaction[]>(initialTransactions)
-  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
   const [filtros, setFiltros] = useState({ trade_code: '', symbol: '', strategy: '', status: '' })
   const [isSearching, setIsSearching] = useState(false)
 
@@ -202,7 +202,7 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   }, [gruposFiltrados, indiceInicio, elementosPorPagina])
 
   const handleToggleExpand = (groupKey: string) => {
-    setCollapsedKeys((prev) => {
+    setExpandedKeys((prev) => {
       const next = new Set(prev)
       if (next.has(groupKey)) {
         next.delete(groupKey)
@@ -214,22 +214,12 @@ export default function TransactionsTableClient({ initialTransactions, estrategi
   }
 
   const handleExpandAllPage = () => {
-    setCollapsedKeys(new Set())
+    setExpandedKeys(new Set(gruposPaginados.map((g) => g.groupKey)))
   }
 
   const handleCollapseAll = () => {
-    setCollapsedKeys(new Set(gruposPaginados.map((g) => g.groupKey)))
+    setExpandedKeys(new Set())
   }
-
-  const expandedKeys = useMemo(() => {
-    const s = new Set<string>()
-    for (const g of gruposPaginados) {
-      if (!collapsedKeys.has(g.groupKey)) {
-        s.add(g.groupKey)
-      }
-    }
-    return s
-  }, [gruposPaginados, collapsedKeys])
 
   const actualizarTradeGroup = async (
     group: TradeTransactionGroup,
