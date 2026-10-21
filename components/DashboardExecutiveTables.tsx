@@ -420,6 +420,65 @@ export default function DashboardExecutiveTables({
             </div>
           </div>
 
+          {/* AUDIT SUMMARY KPI CARDS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-6 bg-slate-50/40 border-b border-gray-100">
+            {/* Average Period (Days) */}
+            <div className="p-4 rounded-2xl bg-white border border-gray-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Average Period</span>
+                <p className="text-2xl font-extrabold text-gray-900 mt-0.5">
+                  {auditMetrics.averagePeriodDays ?? 0} <span className="text-sm font-semibold text-gray-500">days</span>
+                </p>
+                <span className="text-[11px] text-gray-500 font-medium">All closed trades</span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg">
+                ⏱️
+              </div>
+            </div>
+
+            {/* Average Period (Winner) */}
+            <div className="p-4 rounded-2xl bg-white border border-gray-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Avg Period (Winner)</span>
+                <p className="text-2xl font-extrabold text-emerald-600 mt-0.5">
+                  {auditMetrics.averagePeriodWinner ?? 0} <span className="text-sm font-semibold text-emerald-500">days</span>
+                </p>
+                <span className="text-[11px] text-gray-500 font-medium">Winning trades</span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+                🎯
+              </div>
+            </div>
+
+            {/* Average Period (Loser) */}
+            <div className="p-4 rounded-2xl bg-white border border-gray-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Avg Period (Loser)</span>
+                <p className="text-2xl font-extrabold text-rose-600 mt-0.5">
+                  {auditMetrics.averagePeriodLoser ?? 0} <span className="text-sm font-semibold text-rose-500">days</span>
+                </p>
+                <span className="text-[11px] text-gray-500 font-medium">Losing trades</span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-lg">
+                🛑
+              </div>
+            </div>
+
+            {/* Monthly Transactions */}
+            <div className="p-4 rounded-2xl bg-white border border-gray-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Monthly Transactions</span>
+                <p className="text-2xl font-extrabold text-indigo-900 mt-0.5">
+                  {auditMetrics.monthlyTransactions ?? 0} <span className="text-sm font-semibold text-indigo-400">/ mo</span>
+                </p>
+                <span className="text-[11px] text-gray-500 font-medium">Active months avg</span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg">
+                🔄
+              </div>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-collapse">
               <thead>

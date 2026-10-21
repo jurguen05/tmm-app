@@ -15,7 +15,7 @@ import {
   RiskStrategyRow,
   ExecutiveDashboardData
 } from '../types';
-import { normalizeUniqueKey } from './formatters';
+import { normalizeUniqueKey, parsearFechaTOS } from './formatters';
 
 /**
  * Estrategias excluidas explícitamente en las directrices de negocio para los análisis de P&L y Riesgo
@@ -670,10 +670,107 @@ export const calcularAuditMetrics = (
   const openList = Array.from(dictOpen.values());
   const overallList = [...closedList, ...openList];
 
+  // 1. Mapeo de trades maestros y transacciones para duraciones de períodos
+  const tradesByCode = new Map<number, Trade>();
+  (trades || []).forEach(tr => {
+    if (tr.trade_code !== null && tr.trade_code !== undefined) {
+      const codeNum = Number(tr.trade_code);
+      if (!isNaN(codeNum)) {
+        tradesByCode.set(codeNum, tr);
+      }
+    }
+  });
+
+  const txsByTrade = new Map<string, Transaction[]>();
+  for (const tx of transactions) {
+    const tid = tx.trade_code !== null && tx.trade_code !== undefined ? String(tx.trade_code).trim() : '';
+    if (!tid || tid === '1' || tid.toUpperCase() === 'N/A') continue;
+    const list = txsByTrade.get(tid) || [];
+    list.push(tx);
+    txsByTrade.set(tid, list);
+  }
+
+  // 2. Cálculo de duraciones de trades cerrados evaluados en dictClosed (excluyendo trade_code 1 y Hedge)
+  const allPeriods: number[] = [];
+  const winnerPeriods: number[] = [];
+  const loserPeriods: number[] = [];
+
+  for (const [tid, realizedPnL] of dictClosed.entries()) {
+    const codeNum = Number(tid);
+    const tr = !isNaN(codeNum) ? tradesByCode.get(codeNum) : undefined;
+
+    let startDate: string | null = tr?.first_buy_date ? String(tr.first_buy_date).slice(0, 10) : null;
+    let endDate: string | null = tr?.closed_date ? String(tr.closed_date).slice(0, 10) : null;
+
+    if (!startDate || !endDate) {
+      const txList = txsByTrade.get(tid);
+      if (txList && txList.length > 0) {
+        const sortedDates = txList
+          .map(t => parsearFechaTOS(t.date) || (t.date ? String(t.date).slice(0, 10) : null))
+          .filter((d): d is string => !!d)
+          .sort();
+        if (sortedDates.length > 0) {
+          if (!startDate) startDate = sortedDates[0];
+          if (!endDate) endDate = sortedDates[sortedDates.length - 1];
+        }
+      }
+    }
+
+    if (startDate && endDate) {
+      const d1 = Date.parse(startDate.length === 10 ? `${startDate}T00:00:00Z` : startDate);
+      const d2 = Date.parse(endDate.length === 10 ? `${endDate}T00:00:00Z` : endDate);
+      if (!isNaN(d1) && !isNaN(d2) && d2 >= d1) {
+        const periodDays = Math.round((d2 - d1) / 86400000);
+        allPeriods.push(periodDays);
+        if (realizedPnL > 0) {
+          winnerPeriods.push(periodDays);
+        } else if (realizedPnL < 0) {
+          loserPeriods.push(periodDays);
+        }
+      }
+    }
+  }
+
+  const averagePeriodDays = allPeriods.length > 0
+    ? Number((allPeriods.reduce((a, b) => a + b, 0) / allPeriods.length).toFixed(1))
+    : 0;
+
+  const averagePeriodWinner = winnerPeriods.length > 0
+    ? Number((winnerPeriods.reduce((a, b) => a + b, 0) / winnerPeriods.length).toFixed(1))
+    : 0;
+
+  const averagePeriodLoser = loserPeriods.length > 0
+    ? Number((loserPeriods.reduce((a, b) => a + b, 0) / loserPeriods.length).toFixed(1))
+    : 0;
+
+  // 3. Cálculo de Monthly Transactions (Total de transacciones / cantidad de meses con actividad)
+  const activeMonths = new Set<string>();
+  let totalTradingTransactions = 0;
+
+  for (const tx of transactions) {
+    if (!tx) continue;
+    const tid = tx.trade_code !== null && tx.trade_code !== undefined ? String(tx.trade_code).trim() : '';
+    if (tid === '1' || tid.toUpperCase() === 'N/A') continue;
+
+    const isoDate = parsearFechaTOS(tx.date) || (tx.date ? String(tx.date).slice(0, 10) : null);
+    if (isoDate && isoDate.length >= 7) {
+      totalTradingTransactions++;
+      activeMonths.add(isoDate.slice(0, 7)); // 'YYYY-MM'
+    }
+  }
+
+  const monthlyTransactions = activeMonths.size > 0
+    ? Number((totalTradingTransactions / activeMonths.size).toFixed(1))
+    : 0;
+
   return {
     closed: calcularMetricasColumna(closedList),
     open: calcularMetricasColumna(openList),
-    overall: calcularMetricasColumna(overallList)
+    overall: calcularMetricasColumna(overallList),
+    averagePeriodDays,
+    averagePeriodWinner,
+    averagePeriodLoser,
+    monthlyTransactions
   };
 };
 

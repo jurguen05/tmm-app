@@ -211,6 +211,10 @@ export interface AuditMetricColumn {
 }
 
 export interface AuditMetricsSummary {
+  averagePeriodDays: number;
+  averagePeriodWinner: number;
+  averagePeriodLoser: number;
+  monthlyTransactions: number;
   closed: AuditMetricColumn;
   open: AuditMetricColumn;
   overall: AuditMetricColumn;
