@@ -7,53 +7,74 @@ import { supabase } from '../../lib/supabase'
 import QuickUploadModal from '../../components/QuickUploadModal'
 import ConsistencyAlertBadge from '../../components/ConsistencyAlertBadge'
 import NavSection from '../../components/NavSection'
+import NavSubmenu, { NavSubmenuItem } from '../../components/NavSubmenu'
 
-type CategoryKey = 'portfolio' | 'risk' | 'simulation' | 'contracts'
+type TopCategoryKey = 'portfolio' | 'contracts'
+type SubmenuKey = 'strategies' | 'risk' | 'simulation'
 
-const DEFAULT_CATEGORIES_STATE: Record<CategoryKey, boolean> = {
+const DEFAULT_CATEGORIES: Record<TopCategoryKey, boolean> = {
   portfolio: true,
+  contracts: true,
+}
+
+const DEFAULT_SUBMENUS: Record<SubmenuKey, boolean> = {
+  strategies: true,
   risk: true,
   simulation: true,
-  contracts: true,
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const [modalAbierto, setModalAbierto] = useState(false)
-  const [strategiesExpanded, setStrategiesExpanded] = useState(true)
   const [userRole, setUserRole] = useState<number | null>(null)
 
-  const [openCategories, setOpenCategories] = useState<Record<CategoryKey, boolean>>(DEFAULT_CATEGORIES_STATE)
+  const [openCategories, setOpenCategories] = useState<Record<TopCategoryKey, boolean>>(DEFAULT_CATEGORIES)
+  const [openSubmenus, setOpenSubmenus] = useState<Record<SubmenuKey, boolean>>(DEFAULT_SUBMENUS)
 
-  // Load persisted category state on mount
+  // Load persisted category and submenu state on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('tmm_nav_categories')
-      if (saved) {
-        setOpenCategories(prev => ({ ...prev, ...JSON.parse(saved) }))
+      const savedCats = localStorage.getItem('tmm_nav_categories')
+      if (savedCats) {
+        setOpenCategories(prev => ({ ...prev, ...JSON.parse(savedCats) }))
+      }
+      const savedSubs = localStorage.getItem('tmm_nav_submenus')
+      if (savedSubs) {
+        setOpenSubmenus(prev => ({ ...prev, ...JSON.parse(savedSubs) }))
       }
     } catch (e) {
       console.warn('Failed to load navigation state from localStorage:', e)
     }
   }, [])
 
-  const toggleCategory = (key: CategoryKey) => {
+  const toggleCategory = (key: TopCategoryKey) => {
     setOpenCategories(prev => {
       const next = { ...prev, [key]: !prev[key] }
       try {
         localStorage.setItem('tmm_nav_categories', JSON.stringify(next))
       } catch (e) {
-        console.warn('Failed to save navigation state:', e)
+        console.warn('Failed to save category state:', e)
       }
       return next
     })
   }
 
-  // Determine active category based on current pathname
-  const isPortfolioActive =
-    pathname === '/dashboard' ||
-    pathname.startsWith('/dashboard/strategies-stops') ||
+  const toggleSubmenu = (key: SubmenuKey) => {
+    setOpenSubmenus(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      try {
+        localStorage.setItem('tmm_nav_submenus', JSON.stringify(next))
+      } catch (e) {
+        console.warn('Failed to save submenu state:', e)
+      }
+      return next
+    })
+  }
+
+  // Active status detection
+  const isStrategiesActive =
+    pathname === '/dashboard/strategies-stops' ||
     pathname.startsWith('/dashboard/transactions') ||
     pathname.startsWith('/dashboard/positions') ||
     pathname.startsWith('/dashboard/mk-tos')
@@ -67,29 +88,73 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     pathname.startsWith('/dashboard/hedging') ||
     pathname.startsWith('/dashboard/monte-carlo')
 
-  const isContractsActive = pathname.startsWith('/dashboard/contracts')
+  const isPortfolioActive =
+    pathname === '/dashboard' ||
+    isStrategiesActive ||
+    isRiskActive ||
+    isSimulationActive
 
-  // Auto-expand the category of the active route
+  const isContractsActive =
+    pathname === '/dashboard/contracts' ||
+    (pathname.startsWith('/dashboard/contracts/') &&
+      !pathname.startsWith('/dashboard/contracts/contacts') &&
+      !pathname.startsWith('/dashboard/contracts/originators')) ||
+    pathname.startsWith('/dashboard/contracts/originators')
+
+  const isContactsActive = pathname === '/dashboard/contracts/contacts'
+
+  // Auto-expand category and sub-menus when an active route is visited
   useEffect(() => {
-    let activeKey: CategoryKey | null = null
-    if (isPortfolioActive) activeKey = 'portfolio'
-    else if (isRiskActive) activeKey = 'risk'
-    else if (isSimulationActive) activeKey = 'simulation'
-    else if (isContractsActive) activeKey = 'contracts'
-
-    if (activeKey) {
+    if (isPortfolioActive) {
       setOpenCategories(prev => {
-        if (!prev[activeKey]) {
-          const next = { ...prev, [activeKey]: true }
-          try {
-            localStorage.setItem('tmm_nav_categories', JSON.stringify(next))
-          } catch (_) {}
+        if (!prev.portfolio) {
+          const next = { ...prev, portfolio: true }
+          try { localStorage.setItem('tmm_nav_categories', JSON.stringify(next)) } catch (_) {}
+          return next
+        }
+        return prev
+      })
+      if (isStrategiesActive) {
+        setOpenSubmenus(prev => {
+          if (!prev.strategies) {
+            const next = { ...prev, strategies: true }
+            try { localStorage.setItem('tmm_nav_submenus', JSON.stringify(next)) } catch (_) {}
+            return next
+          }
+          return prev
+        })
+      }
+      if (isRiskActive) {
+        setOpenSubmenus(prev => {
+          if (!prev.risk) {
+            const next = { ...prev, risk: true }
+            try { localStorage.setItem('tmm_nav_submenus', JSON.stringify(next)) } catch (_) {}
+            return next
+          }
+          return prev
+        })
+      }
+      if (isSimulationActive) {
+        setOpenSubmenus(prev => {
+          if (!prev.simulation) {
+            const next = { ...prev, simulation: true }
+            try { localStorage.setItem('tmm_nav_submenus', JSON.stringify(next)) } catch (_) {}
+            return next
+          }
+          return prev
+        })
+      }
+    } else if (isContractsActive) {
+      setOpenCategories(prev => {
+        if (!prev.contracts) {
+          const next = { ...prev, contracts: true }
+          try { localStorage.setItem('tmm_nav_categories', JSON.stringify(next)) } catch (_) {}
           return next
         }
         return prev
       })
     }
-  }, [pathname, isPortfolioActive, isRiskActive, isSimulationActive, isContractsActive])
+  }, [pathname, isPortfolioActive, isStrategiesActive, isRiskActive, isSimulationActive, isContractsActive])
 
   useEffect(() => {
     async function fetchUserRole() {
@@ -116,6 +181,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     await supabase.auth.signOut()
     router.push('/')
   }
+
+  // Submenu items definitions
+  const strategiesItems: NavSubmenuItem[] = [
+    { label: 'Transactions', href: '/dashboard/transactions', dotColor: 'bg-indigo-400' },
+    { label: 'Positions', href: '/dashboard/positions', dotColor: 'bg-emerald-400' },
+    { label: 'Mk-Tos', href: '/dashboard/mk-tos', dotColor: 'bg-amber-400' },
+  ]
+
+  const riskItems: NavSubmenuItem[] = [
+    { label: 'Portfolio Risk', href: '/dashboard/portfolio-risk', dotColor: 'bg-rose-400' },
+    { label: 'Risk Strategies', href: '/dashboard/risk-strategies', dotColor: 'bg-amber-400' },
+    { label: 'Drawdown', href: '/dashboard/drawdown', dotColor: 'bg-red-400' },
+  ]
+
+  const simulationItems: NavSubmenuItem[] = [
+    { label: 'Hedging', href: '/dashboard/hedging', dotColor: 'bg-teal-400' },
+    { label: 'Monte Carlo', href: '/dashboard/monte-carlo', dotColor: 'bg-cyan-400' },
+  ]
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -160,14 +243,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           ) : (
             <>
-              {/* CATEGORY 1: PORTFOLIO & TRADING */}
+              {/* TOP LEVEL 1: PORTFOLIO & TRADING (COLLAPSIBLE CATEGORY) */}
               <NavSection
                 title="Portfolio & Trading"
                 isOpen={openCategories.portfolio}
                 onToggle={() => toggleCategory('portfolio')}
                 hasActiveChild={isPortfolioActive}
               >
-                {/* Summary */}
+                {/* 1. Summary */}
                 <Link 
                   href="/dashboard"
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -182,188 +265,54 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span>Summary</span>
                 </Link>
 
-                {/* Strategies Stops & Dependent Subtree */}
-                <div className="space-y-1">
-                  <div className={`flex items-center justify-between rounded-lg transition-colors ${
-                    pathname === '/dashboard/strategies-stops' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-gray-800/60'
-                  }`}>
-                    <Link
-                      href="/dashboard/strategies-stops"
-                      onClick={() => setStrategiesExpanded(true)}
-                      className={`flex-1 px-3 py-2 flex items-center gap-2 text-sm font-medium rounded-lg transition-colors ${
-                        pathname === '/dashboard/strategies-stops'
-                          ? 'text-white'
-                          : 'text-gray-300 hover:text-white'
-                      }`}
-                    >
-                      <svg className={`w-4 h-4 ${pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-indigo-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                      </svg>
-                      <span>Strategies Stops</span>
-                    </Link>
+                {/* 2. Strategies Stops & Subtree */}
+                <NavSubmenu
+                  title="Strategies Stops"
+                  icon={
+                    <svg className={`w-4 h-4 ${pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-indigo-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                  }
+                  isExpanded={openSubmenus.strategies}
+                  onToggle={() => toggleSubmenu('strategies')}
+                  isActive={isStrategiesActive}
+                  mainHref="/dashboard/strategies-stops"
+                  items={strategiesItems}
+                  currentPathname={pathname}
+                />
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setStrategiesExpanded(!strategiesExpanded)
-                      }}
-                      className={`p-2 rounded-r-lg hover:bg-black/20 transition-colors cursor-pointer ${
-                        pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-gray-400 hover:text-white'
-                      }`}
-                      title={strategiesExpanded ? "Collapse sub-menu" : "Expand sub-menu"}
-                    >
-                      <svg 
-                        className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                          strategiesExpanded ? 'rotate-90' : ''
-                        }`}
-                        fill="none" 
-                        stroke="currentColor" 
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </div>
+                {/* 3. Risk Management & Subtree */}
+                <NavSubmenu
+                  title="Risk Management"
+                  icon={
+                    <svg className={`w-4 h-4 ${isRiskActive ? 'text-white' : 'text-rose-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  }
+                  isExpanded={openSubmenus.risk}
+                  onToggle={() => toggleSubmenu('risk')}
+                  isActive={isRiskActive}
+                  items={riskItems}
+                  currentPathname={pathname}
+                />
 
-                  {/* Submenú colapsable con línea vertical de árbol */}
-                  {strategiesExpanded && (
-                    <div className="relative pl-4 ml-3 border-l-2 border-gray-700/60 space-y-1 mt-1 transition-all">
-                      {/* Transactions */}
-                      <Link 
-                        href="/dashboard/transactions"
-                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          pathname === '/dashboard/transactions'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                        }`}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                        <span>Transactions</span>
-                      </Link>
-
-                      {/* Positions */}
-                      <Link 
-                        href="/dashboard/positions"
-                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          pathname === '/dashboard/positions'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                        }`}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                        <span>Positions</span>
-                      </Link>
-
-                      {/* Mk-Tos */}
-                      <Link 
-                        href="/dashboard/mk-tos"
-                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          pathname === '/dashboard/mk-tos'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                        }`}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                        <span>Mk-Tos</span>
-                      </Link>
-                    </div>
-                  )}
-                </div>
+                {/* 4. Simulation Management & Subtree */}
+                <NavSubmenu
+                  title="Simulation Management"
+                  icon={
+                    <svg className={`w-4 h-4 ${isSimulationActive ? 'text-white' : 'text-teal-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                  }
+                  isExpanded={openSubmenus.simulation}
+                  onToggle={() => toggleSubmenu('simulation')}
+                  isActive={isSimulationActive}
+                  items={simulationItems}
+                  currentPathname={pathname}
+                />
               </NavSection>
 
-              {/* CATEGORY 2: RISK MANAGEMENT */}
-              <NavSection
-                title="Risk Management"
-                isOpen={openCategories.risk}
-                onToggle={() => toggleCategory('risk')}
-                hasActiveChild={isRiskActive}
-              >
-                {/* Portfolio Risk */}
-                <Link 
-                  href="/dashboard/portfolio-risk"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/portfolio-risk'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <span>Portfolio Risk</span>
-                </Link>
-
-                {/* Risk Strategies */}
-                <Link 
-                  href="/dashboard/risk-strategies"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/risk-strategies'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                  <span>Risk Strategies</span>
-                </Link>
-
-                {/* Drawdown */}
-                <Link 
-                  href="/dashboard/drawdown"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/drawdown'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-                  </svg>
-                  <span>Drawdown</span>
-                </Link>
-              </NavSection>
-
-              {/* CATEGORY 3: SIMULATION & HEDGING */}
-              <NavSection
-                title="Simulation & Hedging"
-                isOpen={openCategories.simulation}
-                onToggle={() => toggleCategory('simulation')}
-                hasActiveChild={isSimulationActive}
-              >
-                {/* Hedging */}
-                <Link 
-                  href="/dashboard/hedging"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/hedging'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  <span>Hedging</span>
-                </Link>
-
-                {/* Monte Carlo */}
-                <Link 
-                  href="/dashboard/monte-carlo"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/monte-carlo'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                  <span>Monte Carlo</span>
-                </Link>
-              </NavSection>
-
-              {/* CATEGORY 4: CAPITAL & CONTRACTS */}
+              {/* TOP LEVEL 2: CAPITAL & CONTRACTS (COLLAPSIBLE CATEGORY) */}
               <NavSection
                 title="Capital & Contracts"
                 isOpen={openCategories.contracts}
@@ -374,7 +323,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <Link 
                   href="/dashboard/contracts"
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/contracts' || (pathname.startsWith('/dashboard/contracts/') && !pathname.startsWith('/dashboard/contracts/contacts') && !pathname.startsWith('/dashboard/contracts/originators') && !pathname.startsWith('/dashboard/contracts/investors'))
+                    isContractsActive && !pathname.startsWith('/dashboard/contracts/originators')
                       ? 'bg-indigo-600 text-white shadow-sm' 
                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                   }`}
@@ -383,21 +332,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   <span>Contracts</span>
-                </Link>
-
-                {/* Unified Contacts Directory */}
-                <Link 
-                  href="/dashboard/contracts/contacts"
-                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    pathname === '/dashboard/contracts/contacts'
-                      ? 'bg-indigo-600 text-white shadow-sm' 
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                  <span>Contacts & Entities</span>
                 </Link>
 
                 {/* Originators */}
@@ -410,11 +344,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }`}
                 >
                   <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                   </svg>
                   <span>Originators</span>
                 </Link>
               </NavSection>
+
+              {/* TOP LEVEL 3: CONTACTS & ENTITIES (AT THE SAME LEVEL AS PORTFOLIO & CAPITAL) */}
+              <div className="pt-1">
+                <Link 
+                  href="/dashboard/contracts/contacts"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    isContactsActive
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span>Contacts & Entities</span>
+                </Link>
+              </div>
             </>
           )}
         </nav>
