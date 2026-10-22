@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { ConsistencyAuditResult, ConsistencyIssue, ConsistencySeverity } from '../types'
 
@@ -19,9 +20,25 @@ export default function ConsistencyModal({
   onRefresh,
   isRefreshing = false
 }: ConsistencyModalProps) {
+  const [mounted, setMounted] = useState(false)
   const [filterSeverity, setFilterSeverity] = useState<'all' | ConsistencySeverity>('all')
 
-  if (!isOpen) return null
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
+
+  if (!isOpen || !mounted) return null
 
   const issues = audit?.issues || []
   const filteredIssues = filterSeverity === 'all'
@@ -31,17 +48,17 @@ export default function ConsistencyModal({
   const redCount = audit?.redCount || 0
   const yellowCount = audit?.yellowCount || 0
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
       onClick={onClose}
     >
       <div 
-        className="bg-gray-900 border border-gray-700 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]"
+        className="bg-gray-900 border border-gray-700 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh] relative z-10"
         onClick={e => e.stopPropagation()}
       >
         {/* HEADER */}
-        <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/70">
+        <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950 relative z-20">
           <div className="flex items-center gap-3">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
               audit?.maxSeverity === 'red'
@@ -69,9 +86,10 @@ export default function ConsistencyModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative z-30">
             {onRefresh && (
               <button
+                type="button"
                 onClick={onRefresh}
                 disabled={isRefreshing}
                 title="Re-run audit"
@@ -83,7 +101,9 @@ export default function ConsistencyModal({
               </button>
             )}
             <button
+              type="button"
               onClick={onClose}
+              title="Close modal"
               className="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 flex items-center justify-center transition-colors cursor-pointer text-sm font-semibold"
             >
               ✕
@@ -93,9 +113,10 @@ export default function ConsistencyModal({
 
         {/* FILTER PILLS */}
         {issues.length > 0 && (
-          <div className="px-6 py-2.5 bg-gray-950/40 border-b border-gray-800/80 flex items-center gap-2 text-xs">
+          <div className="px-6 py-2.5 bg-gray-950/80 border-b border-gray-800/80 flex items-center gap-2 text-xs">
             <span className="text-gray-400 font-medium mr-1">Filter:</span>
             <button
+              type="button"
               onClick={() => setFilterSeverity('all')}
               className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer font-medium ${
                 filterSeverity === 'all'
@@ -107,6 +128,7 @@ export default function ConsistencyModal({
             </button>
             {redCount > 0 && (
               <button
+                type="button"
                 onClick={() => setFilterSeverity('red')}
                 className={`px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-colors cursor-pointer font-medium ${
                   filterSeverity === 'red'
@@ -120,6 +142,7 @@ export default function ConsistencyModal({
             )}
             {yellowCount > 0 && (
               <button
+                type="button"
                 onClick={() => setFilterSeverity('yellow')}
                 className={`px-2.5 py-1 rounded-md flex items-center gap-1.5 transition-colors cursor-pointer font-medium ${
                   filterSeverity === 'yellow'
@@ -246,12 +269,13 @@ export default function ConsistencyModal({
         </div>
 
         {/* FOOTER */}
-        <div className="px-6 py-3 border-t border-gray-800 bg-gray-950/60 flex items-center justify-between text-xs text-gray-400">
+        <div className="px-6 py-3 border-t border-gray-800 bg-gray-950 flex items-center justify-between text-xs text-gray-400 relative z-20">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span>Evaluated live on file upload & page visit</span>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="px-3.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium transition-colors cursor-pointer"
           >
@@ -259,6 +283,7 @@ export default function ConsistencyModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
