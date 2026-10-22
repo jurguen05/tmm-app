@@ -6,6 +6,16 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import QuickUploadModal from '../../components/QuickUploadModal'
 import ConsistencyAlertBadge from '../../components/ConsistencyAlertBadge'
+import NavSection from '../../components/NavSection'
+
+type CategoryKey = 'portfolio' | 'risk' | 'simulation' | 'contracts'
+
+const DEFAULT_CATEGORIES_STATE: Record<CategoryKey, boolean> = {
+  portfolio: true,
+  risk: true,
+  simulation: true,
+  contracts: true,
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -13,6 +23,73 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [modalAbierto, setModalAbierto] = useState(false)
   const [strategiesExpanded, setStrategiesExpanded] = useState(true)
   const [userRole, setUserRole] = useState<number | null>(null)
+
+  const [openCategories, setOpenCategories] = useState<Record<CategoryKey, boolean>>(DEFAULT_CATEGORIES_STATE)
+
+  // Load persisted category state on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('tmm_nav_categories')
+      if (saved) {
+        setOpenCategories(prev => ({ ...prev, ...JSON.parse(saved) }))
+      }
+    } catch (e) {
+      console.warn('Failed to load navigation state from localStorage:', e)
+    }
+  }, [])
+
+  const toggleCategory = (key: CategoryKey) => {
+    setOpenCategories(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      try {
+        localStorage.setItem('tmm_nav_categories', JSON.stringify(next))
+      } catch (e) {
+        console.warn('Failed to save navigation state:', e)
+      }
+      return next
+    })
+  }
+
+  // Determine active category based on current pathname
+  const isPortfolioActive =
+    pathname === '/dashboard' ||
+    pathname.startsWith('/dashboard/strategies-stops') ||
+    pathname.startsWith('/dashboard/transactions') ||
+    pathname.startsWith('/dashboard/positions') ||
+    pathname.startsWith('/dashboard/mk-tos')
+
+  const isRiskActive =
+    pathname.startsWith('/dashboard/portfolio-risk') ||
+    pathname.startsWith('/dashboard/risk-strategies') ||
+    pathname.startsWith('/dashboard/drawdown')
+
+  const isSimulationActive =
+    pathname.startsWith('/dashboard/hedging') ||
+    pathname.startsWith('/dashboard/monte-carlo')
+
+  const isContractsActive = pathname.startsWith('/dashboard/contracts')
+
+  // Auto-expand the category of the active route
+  useEffect(() => {
+    let activeKey: CategoryKey | null = null
+    if (isPortfolioActive) activeKey = 'portfolio'
+    else if (isRiskActive) activeKey = 'risk'
+    else if (isSimulationActive) activeKey = 'simulation'
+    else if (isContractsActive) activeKey = 'contracts'
+
+    if (activeKey) {
+      setOpenCategories(prev => {
+        if (!prev[activeKey]) {
+          const next = { ...prev, [activeKey]: true }
+          try {
+            localStorage.setItem('tmm_nav_categories', JSON.stringify(next))
+          } catch (_) {}
+          return next
+        }
+        return prev
+      })
+    }
+  }, [pathname, isPortfolioActive, isRiskActive, isSimulationActive, isContractsActive])
 
   useEffect(() => {
     async function fetchUserRole() {
@@ -60,7 +137,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           )}
         </div>
         
-        <nav className="flex-1 px-4 space-y-6 mt-2 overflow-y-auto">
+        <nav className="flex-1 px-4 space-y-4 mt-2 overflow-y-auto">
           {/* SI EL USUARIO ES INVERSOR (ROLE_ID === 2), SOLO VE SU PORTAL */}
           {userRole === 2 ? (
             <div className="space-y-1">
@@ -83,257 +160,261 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           ) : (
             <>
-          {/* CATEGORY 1: PORTFOLIO & TRADING */}
-          <div className="space-y-1">
-            <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
-              Portfolio & Trading
-            </div>
-
-            {/* Summary */}
-            <Link 
-              href="/dashboard"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-              </svg>
-              <span>Summary</span>
-            </Link>
-
-            {/* Strategies Stops & Dependent Subtree */}
-            <div className="space-y-1">
-              <div className={`flex items-center justify-between rounded-lg transition-colors ${
-                pathname === '/dashboard/strategies-stops' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-gray-800/60'
-              }`}>
-                <Link
-                  href="/dashboard/strategies-stops"
-                  onClick={() => setStrategiesExpanded(true)}
-                  className={`flex-1 px-3 py-2 flex items-center gap-2 text-sm font-medium rounded-lg transition-colors ${
-                    pathname === '/dashboard/strategies-stops'
-                      ? 'text-white'
-                      : 'text-gray-300 hover:text-white'
+              {/* CATEGORY 1: PORTFOLIO & TRADING */}
+              <NavSection
+                title="Portfolio & Trading"
+                isOpen={openCategories.portfolio}
+                onToggle={() => toggleCategory('portfolio')}
+                hasActiveChild={isPortfolioActive}
+              >
+                {/* Summary */}
+                <Link 
+                  href="/dashboard"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                   }`}
                 >
-                  <svg className={`w-4 h-4 ${pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-indigo-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                   </svg>
-                  <span>Strategies Stops</span>
+                  <span>Summary</span>
                 </Link>
 
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setStrategiesExpanded(!strategiesExpanded)
-                  }}
-                  className={`p-2 rounded-r-lg hover:bg-black/20 transition-colors cursor-pointer ${
-                    pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                  title={strategiesExpanded ? "Collapse sub-menu" : "Expand sub-menu"}
-                >
-                  <svg 
-                    className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                      strategiesExpanded ? 'rotate-90' : ''
-                    }`}
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
+                {/* Strategies Stops & Dependent Subtree */}
+                <div className="space-y-1">
+                  <div className={`flex items-center justify-between rounded-lg transition-colors ${
+                    pathname === '/dashboard/strategies-stops' ? 'bg-indigo-600 text-white shadow-sm' : 'hover:bg-gray-800/60'
+                  }`}>
+                    <Link
+                      href="/dashboard/strategies-stops"
+                      onClick={() => setStrategiesExpanded(true)}
+                      className={`flex-1 px-3 py-2 flex items-center gap-2 text-sm font-medium rounded-lg transition-colors ${
+                        pathname === '/dashboard/strategies-stops'
+                          ? 'text-white'
+                          : 'text-gray-300 hover:text-white'
+                      }`}
+                    >
+                      <svg className={`w-4 h-4 ${pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-indigo-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                      </svg>
+                      <span>Strategies Stops</span>
+                    </Link>
 
-              {/* Submenú colapsable con línea vertical de árbol */}
-              {strategiesExpanded && (
-                <div className="relative pl-4 ml-3 border-l-2 border-gray-700/60 space-y-1 mt-1 transition-all">
-                  {/* Transactions */}
-                  <Link 
-                    href="/dashboard/transactions"
-                    className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      pathname === '/dashboard/transactions'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                    <span>Transactions</span>
-                  </Link>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setStrategiesExpanded(!strategiesExpanded)
+                      }}
+                      className={`p-2 rounded-r-lg hover:bg-black/20 transition-colors cursor-pointer ${
+                        pathname === '/dashboard/strategies-stops' ? 'text-white' : 'text-gray-400 hover:text-white'
+                      }`}
+                      title={strategiesExpanded ? "Collapse sub-menu" : "Expand sub-menu"}
+                    >
+                      <svg 
+                        className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                          strategiesExpanded ? 'rotate-90' : ''
+                        }`}
+                        fill="none" 
+                        stroke="currentColor" 
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
 
-                  {/* Positions */}
-                  <Link 
-                    href="/dashboard/positions"
-                    className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      pathname === '/dashboard/positions'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Positions</span>
-                  </Link>
+                  {/* Submenú colapsable con línea vertical de árbol */}
+                  {strategiesExpanded && (
+                    <div className="relative pl-4 ml-3 border-l-2 border-gray-700/60 space-y-1 mt-1 transition-all">
+                      {/* Transactions */}
+                      <Link 
+                        href="/dashboard/transactions"
+                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          pathname === '/dashboard/transactions'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                        <span>Transactions</span>
+                      </Link>
 
-                  {/* Mk-Tos */}
-                  <Link 
-                    href="/dashboard/mk-tos"
-                    className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      pathname === '/dashboard/mk-tos'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                    }`}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                    <span>Mk-Tos</span>
-                  </Link>
+                      {/* Positions */}
+                      <Link 
+                        href="/dashboard/positions"
+                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          pathname === '/dashboard/positions'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span>Positions</span>
+                      </Link>
+
+                      {/* Mk-Tos */}
+                      <Link 
+                        href="/dashboard/mk-tos"
+                        className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          pathname === '/dashboard/mk-tos'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                        <span>Mk-Tos</span>
+                      </Link>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+              </NavSection>
 
-          {/* CATEGORY 2: RISK MANAGEMENT */}
-          <div className="space-y-1">
-            <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
-              Risk Management
-            </div>
+              {/* CATEGORY 2: RISK MANAGEMENT */}
+              <NavSection
+                title="Risk Management"
+                isOpen={openCategories.risk}
+                onToggle={() => toggleCategory('risk')}
+                hasActiveChild={isRiskActive}
+              >
+                {/* Portfolio Risk */}
+                <Link 
+                  href="/dashboard/portfolio-risk"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/portfolio-risk'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span>Portfolio Risk</span>
+                </Link>
 
-            {/* Portfolio Risk */}
-            <Link 
-              href="/dashboard/portfolio-risk"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/portfolio-risk'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <span>Portfolio Risk</span>
-            </Link>
+                {/* Risk Strategies */}
+                <Link 
+                  href="/dashboard/risk-strategies"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/risk-strategies'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <span>Risk Strategies</span>
+                </Link>
 
-            {/* Risk Strategies */}
-            <Link 
-              href="/dashboard/risk-strategies"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/risk-strategies'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-              <span>Risk Strategies</span>
-            </Link>
+                {/* Drawdown */}
+                <Link 
+                  href="/dashboard/drawdown"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/drawdown'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+                  </svg>
+                  <span>Drawdown</span>
+                </Link>
+              </NavSection>
 
-            {/* Drawdown */}
-            <Link 
-              href="/dashboard/drawdown"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/drawdown'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-              </svg>
-              <span>Drawdown</span>
-            </Link>
-          </div>
+              {/* CATEGORY 3: SIMULATION & HEDGING */}
+              <NavSection
+                title="Simulation & Hedging"
+                isOpen={openCategories.simulation}
+                onToggle={() => toggleCategory('simulation')}
+                hasActiveChild={isSimulationActive}
+              >
+                {/* Hedging */}
+                <Link 
+                  href="/dashboard/hedging"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/hedging'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <span>Hedging</span>
+                </Link>
 
-          {/* CATEGORY 3: SIMULATION & HEDGING */}
-          <div className="space-y-1">
-            <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
-              Simulation & Hedging
-            </div>
+                {/* Monte Carlo */}
+                <Link 
+                  href="/dashboard/monte-carlo"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/monte-carlo'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                  </svg>
+                  <span>Monte Carlo</span>
+                </Link>
+              </NavSection>
 
-            {/* Hedging */}
-            <Link 
-              href="/dashboard/hedging"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/hedging'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-              <span>Hedging</span>
-            </Link>
+              {/* CATEGORY 4: CAPITAL & CONTRACTS */}
+              <NavSection
+                title="Capital & Contracts"
+                isOpen={openCategories.contracts}
+                onToggle={() => toggleCategory('contracts')}
+                hasActiveChild={isContractsActive}
+              >
+                {/* Contracts */}
+                <Link 
+                  href="/dashboard/contracts"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/contracts' || (pathname.startsWith('/dashboard/contracts/') && !pathname.startsWith('/dashboard/contracts/contacts') && !pathname.startsWith('/dashboard/contracts/originators') && !pathname.startsWith('/dashboard/contracts/investors'))
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Contracts</span>
+                </Link>
 
-            {/* Monte Carlo */}
-            <Link 
-              href="/dashboard/monte-carlo"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/monte-carlo'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-              </svg>
-              <span>Monte Carlo</span>
-            </Link>
-          </div>
+                {/* Unified Contacts Directory */}
+                <Link 
+                  href="/dashboard/contracts/contacts"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/contracts/contacts'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span>Contacts & Entities</span>
+                </Link>
 
-          {/* CATEGORY 4: CAPITAL & CONTRACTS */}
-          <div className="space-y-1">
-            <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
-              Capital & Contracts
-            </div>
-
-            {/* Contracts */}
-            <Link 
-              href="/dashboard/contracts"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/contracts' || (pathname.startsWith('/dashboard/contracts/') && !pathname.startsWith('/dashboard/contracts/contacts') && !pathname.startsWith('/dashboard/contracts/originators') && !pathname.startsWith('/dashboard/contracts/investors'))
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span>Contracts</span>
-            </Link>
-
-            {/* Unified Contacts Directory */}
-            <Link 
-              href="/dashboard/contracts/contacts"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/contracts/contacts'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Contacts & Entities</span>
-            </Link>
-
-            {/* Originators */}
-            <Link 
-              href="/dashboard/contracts/originators"
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === '/dashboard/contracts/originators'
-                  ? 'bg-indigo-600 text-white shadow-sm' 
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>Originators</span>
-            </Link>
-          </div>
+                {/* Originators */}
+                <Link 
+                  href="/dashboard/contracts/originators"
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/dashboard/contracts/originators'
+                      ? 'bg-indigo-600 text-white shadow-sm' 
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span>Originators</span>
+                </Link>
+              </NavSection>
             </>
           )}
         </nav>
@@ -341,7 +422,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-4 border-t border-gray-800">
           <button 
             onClick={handleLogout}
-            className="w-full text-left px-4 py-2 text-sm font-medium text-red-400 hover:bg-gray-800 hover:text-red-300 rounded-lg transition-colors"
+            className="w-full text-left px-4 py-2 text-sm font-medium text-red-400 hover:bg-gray-800 hover:text-red-300 rounded-lg transition-colors cursor-pointer"
           >
             Sign Out
           </button>
@@ -359,8 +440,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {pathname === '/dashboard' ? 'Overview' : pathname?.replace('/dashboard/', '').replace(/-/g, ' ')}
             </span>
           </div>
-
-
         </header>
 
         <main className="flex-1 overflow-y-auto">
