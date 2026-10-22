@@ -1,6 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co'
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder'
+
 export async function proxy(request: NextRequest) {
   // 1. Preparamos la respuesta que Next.js va a devolver
   let supabaseResponse = NextResponse.next({
@@ -11,8 +14,8 @@ export async function proxy(request: NextRequest) {
 
   // 2. Creamos un cliente de Supabase que puede leer/escribir cookies en el servidor
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
