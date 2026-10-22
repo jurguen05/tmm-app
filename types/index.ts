@@ -532,3 +532,143 @@ export interface MonteCarloResult {
   activeF: number;
   params: MonteCarloParams;
 }
+
+
+// ==========================================
+// CONTRACTS & INVESTOR MANAGEMENT MODULE
+// ==========================================
+
+export type ContractStatus = 'Open' | 'Closed';
+
+export type InterestPayoutFrequency = 
+  | 'MONTHLY' 
+  | 'BIMONTHLY' 
+  | 'SEMIANNUAL' 
+  | 'ANNUAL' 
+  | 'ON_DEMAND';
+
+export type ContractMovementType = 
+  | 'CAPITAL_DEPOSIT' 
+  | 'CAPITAL_WITHDRAWAL' 
+  | 'INTEREST_WITHDRAWAL';
+
+export type SystemRoleType = 'OPERATOR' | 'INVESTOR' | 'NONE';
+
+export interface Invitation {
+  id: string;
+  token: string;
+  email?: string | null;
+  name?: string | null;
+  contact_id?: string | null;
+  contact?: Partial<Contact> | null;
+  role_id: number;
+  is_investor: boolean;
+  is_originator: boolean;
+  status: 'Pending' | 'Accepted' | 'Expired';
+  expires_at: string;
+  created_at: string;
+  accepted_at?: string | null;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  country?: string | null;
+  tax_id?: string | null;
+  address?: string | null;
+  payout_info?: string | null;
+  is_investor: boolean;
+  is_originator: boolean;
+  is_active?: boolean;
+  user_id?: string | null;
+  role_id?: number | null;        // Technical system role (1 = Operator, 2 = Investor)
+  system_role?: SystemRoleType;
+  notes?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Aliases for clean architecture domain compatibility
+export type Investor = Contact;
+export type Originator = Contact;
+
+export interface ContractRate {
+  id: string;
+  contract_id: string;
+  effective_date: string;
+  investor_annual_rate: number;    // e.g. 0.10 for 10% TNA
+  originator_annual_rate: number;  // e.g. 0.02 for 2% TNA
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface ContractMovement {
+  id: string;
+  contract_id: string;
+  movement_type: ContractMovementType;
+  amount: number;
+  movement_date: string;
+  lockup_until?: string | null;
+  agreed_withdrawal?: boolean;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface Contract {
+  id: string;
+  contract_number: string;
+  investor_name: string;
+  investor_id?: string | null;
+  investor?: Investor | null;
+  user_id?: string | null;
+  start_date: string;
+  initial_amount: number;
+  cutoff_day: number;
+  payout_frequency?: InterestPayoutFrequency;
+  originator_id?: string | null;
+  originator?: Originator | null;
+  status: ContractStatus;
+  notes?: string | null;
+  rates?: ContractRate[];
+  movements?: ContractMovement[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ContractMonthlyLedgerRow {
+  period_index: number;
+  cutoff_date: string;
+  capital_prev: number;
+  investor_rate: number;
+  originator_rate: number;
+  delta_interest: number;
+  delta_originator_commission: number;
+  delta_capital_deposit: number;
+  capital_withdrawal: number;
+  interest_withdrawal: number;
+  capital_end: number;
+}
+
+export interface LockedDepositItem {
+  amount: number;
+  deposit_date: string;
+  lockup_until: string;
+  days_remaining: number;
+}
+
+export interface ContractFinancialSummary {
+  total_capital: number;
+  withdrawable_capital: number;      // > 6 months
+  locked_capital: number;            // < 6 months
+  accumulated_interest: number;
+  withdrawn_interest: number;
+  available_interest: number;
+  originator_accumulated_commissions: number;
+  originator_pending_commissions: number;
+  payout_frequency?: InterestPayoutFrequency;
+  next_payout_date?: string | null;
+  is_closed: boolean;
+  locked_deposits: LockedDepositItem[];
+}

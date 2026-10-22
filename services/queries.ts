@@ -1,6 +1,6 @@
 // services/queries.ts
 
-import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem, ConsistencyAuditResult } from '../types';
+import { Transaction, Strategy, Profile, Position, FileUpload, MkTosQuote, Trade, SpyDailyClose, TradeEnrichmentItem, ConsistencyAuditResult, Contract, Originator, ContractRate, ContractMovement, ContractStatus, Investor, Contact, Invitation } from '../types';
 import { calcularEstadoTradeDesdeTransacciones, calcularCurrentQuantityDesdeTransacciones, calcularDeltaQuantity } from '../lib/transactionsParser';
 import { extraerCashBalanceDesdeCsv } from '../lib/positionsParser';
 import { parsearFechaTOS, calcularDiasHabilesDiferencia, normalizeUniqueKey } from '../lib/formatters';
@@ -2378,4 +2378,494 @@ export async function getPortfolioConsistencyAudit(supabase: SupabaseClient): Pr
     mkTosQuotes: sourceData.mkTosQuotes,
     spyCloses: sourceData.spyCloses
   });
+}
+
+
+// ==============================================================================
+// CONTRACTS, UNIFIED CONTACTS & REPOSITORY
+// ==============================================================================
+
+export async function getContacts(
+  supabase: SupabaseClient,
+  filter?: { is_investor?: boolean; is_originator?: boolean; is_operator?: boolean }
+): Promise<Contact[]> {
+  let query = supabase.from('contacts').select('*');
+
+  if (filter?.is_investor) {
+    query = query.eq('is_investor', true);
+  }
+  if (filter?.is_originator) {
+    query = query.eq('is_originator', true);
+  }
+
+  const { data, error } = await query.order('name', { ascending: true });
+
+  if (error) {
+    console.warn('Error fetching contacts (falling back if table not migrated yet):', error.message);
+    return [];
+  }
+
+  const contactsList: any[] = data ? [...data] : [];
+
+  // Traer profiles para enriquecer el rol de sistema de cada contacto
+  const { data: profiles } = await supabase.from('profiles').select('id, role_id');
+  const profileMap = new Map((profiles || []).map((p: any) => [p.id, p.role_id]));
+
+  // Auto-backfill en runtime si el usuario autenticado tiene profile pero no existe en contacts todavía
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && !contactsList.some(c => c.user_id === user.id)) {
+      const roleId = profileMap.get(user.id) || 1;
+      const userName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'My User';
+      const { data: newContact } = await supabase
+        .from('contacts')
+        .insert([{
+          name: userName,
+          email: user.email,
+          user_id: user.id,
+          is_investor: roleId === 2,
+          is_originator: false
+        }])
+        .select()
+        .single();
+
+      if (newContact) {
+        contactsList.unshift(newContact);
+      }
+    }
+  } catch (err) {
+    // Silently continue if session check fails
+  }
+
+  const enriched = contactsList.map((c: any) => {
+    const roleId = c.user_id ? profileMap.get(c.user_id) : null;
+    const systemRole = roleId === 1 ? 'OPERATOR' : (roleId === 2 ? 'INVESTOR' : 'NONE');
+    return {
+      ...c,
+      role_id: roleId,
+      system_role: systemRole
+    };
+  });
+
+  if (filter?.is_operator) {
+    return enriched.filter(c => c.role_id === 1);
+  }
+
+  return enriched;
+}
+
+export async function getContactById(supabase: SupabaseClient, id: string): Promise<Contact | null> {
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error(`Error fetching contact ${id}:`, error.message);
+    return null;
+  }
+
+  if (data?.user_id) {
+    const { data: profile } = await supabase.from('profiles').select('role_id').eq('id', data.user_id).single();
+    if (profile) {
+      data.role_id = profile.role_id;
+      data.system_role = profile.role_id === 1 ? 'OPERATOR' : (profile.role_id === 2 ? 'INVESTOR' : 'NONE');
+    }
+  }
+
+  return data;
+}
+
+export async function createContact(
+  supabase: SupabaseClient,
+  payload: {
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    country?: string | null;
+    tax_id?: string | null;
+    address?: string | null;
+    payout_info?: string | null;
+    is_investor?: boolean;
+    is_originator?: boolean;
+    user_id?: string | null;
+    role_id?: number | null;
+    notes?: string | null;
+  }
+): Promise<Contact> {
+  const { role_id, ...contactFields } = payload;
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .insert([contactFields])
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  // Si se asignó un usuario y un rol técnico, actualizar/insertar en profiles
+  if (payload.user_id && role_id) {
+    await supabase.from('profiles').upsert({ id: payload.user_id, role_id });
+  }
+
+  return { ...data, role_id: role_id || null };
+}
+
+export async function updateContact(
+  supabase: SupabaseClient,
+  id: string,
+  payload: Partial<Contact>
+): Promise<Contact> {
+  const { role_id, system_role, ...contactFields } = payload;
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .update({ ...contactFields, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  // Sincronizar el rol técnico en profiles si se especificó user_id y role_id
+  const targetUserId = payload.user_id !== undefined ? payload.user_id : data.user_id;
+  if (targetUserId && role_id) {
+    await supabase.from('profiles').upsert({ id: targetUserId, role_id });
+  }
+
+  return { ...data, role_id: role_id || null };
+}
+
+export async function getSystemProfiles(supabase: SupabaseClient): Promise<{ id: string; role_id: number }[]> {
+  const { data } = await supabase.from('profiles').select('*');
+  return data || [];
+}
+
+// ==============================================================================
+// INVITATIONS & ONBOARDING
+// ==============================================================================
+
+export async function createInvitation(
+  supabase: SupabaseClient,
+  payload: {
+    email?: string | null;
+    name?: string | null;
+    contact_id?: string | null;
+    role_id?: number;
+    is_investor?: boolean;
+    is_originator?: boolean;
+  }
+): Promise<Invitation> {
+  const array = new Uint8Array(24);
+  crypto.getRandomValues(array);
+  const token = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+
+  const { data, error } = await supabase
+    .from('invitations')
+    .insert([{
+      token,
+      email: payload.email?.trim() || null,
+      name: payload.name?.trim() || null,
+      contact_id: payload.contact_id || null,
+      role_id: payload.role_id || 2,
+      is_investor: payload.is_investor !== undefined ? payload.is_investor : true,
+      is_originator: payload.is_originator !== undefined ? payload.is_originator : false,
+      status: 'Pending',
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    }])
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getInvitationByToken(
+  supabase: SupabaseClient,
+  token: string
+): Promise<Invitation | null> {
+  const { data, error } = await supabase
+    .from('invitations')
+    .select(`
+      *,
+      contact:contacts(name, email, phone, country, tax_id, payout_info)
+    `)
+    .eq('token', token)
+    .single();
+
+  if (error || !data) return null;
+
+  if (data.status === 'Pending' && new Date(data.expires_at) < new Date()) {
+    await supabase.from('invitations').update({ status: 'Expired' }).eq('id', data.id);
+    return { ...data, status: 'Expired' };
+  }
+
+  const contactData = data.contact;
+  const mergedEmail = data.email || contactData?.email || null;
+  const mergedName = data.name || contactData?.name || null;
+
+  return {
+    ...data,
+    email: mergedEmail,
+    name: mergedName,
+    contact: contactData || null
+  };
+}
+
+// Retrocompatible helper functions
+export async function getInvestors(supabase: SupabaseClient): Promise<Contact[]> {
+  const contacts = await getContacts(supabase, { is_investor: true });
+  if (contacts.length > 0) return contacts;
+
+  // Fallback to investors table if contacts is empty
+  const { data } = await supabase.from('investors').select('*').order('name', { ascending: true });
+  return (data || []).map((i: any) => ({ ...i, is_investor: true, is_originator: false }));
+}
+
+export async function createInvestor(
+  supabase: SupabaseClient,
+  payload: {
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    tax_id?: string | null;
+    address?: string | null;
+    payout_info?: string | null;
+    notes?: string | null;
+  }
+): Promise<Contact> {
+  return createContact(supabase, {
+    ...payload,
+    is_investor: true,
+    is_originator: false
+  });
+}
+
+export async function getOriginators(supabase: SupabaseClient): Promise<Contact[]> {
+  const contacts = await getContacts(supabase, { is_originator: true });
+  if (contacts.length > 0) return contacts;
+
+  // Fallback to originators table if contacts is empty
+  const { data } = await supabase.from('originators').select('*').order('name', { ascending: true });
+  return (data || []).map((o: any) => ({ ...o, is_investor: false, is_originator: true }));
+}
+
+export async function createOriginator(
+  supabase: SupabaseClient,
+  payload: {
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    tax_id?: string | null;
+    payout_info?: string | null;
+    notes?: string | null;
+  }
+): Promise<Contact> {
+  return createContact(supabase, {
+    ...payload,
+    is_investor: false,
+    is_originator: true
+  });
+}
+
+export async function getNextContractNumber(supabase: SupabaseClient, targetYear?: number): Promise<string> {
+  const year = targetYear || new Date().getFullYear();
+  const prefix = `CON-${year}-`;
+
+  const { data, error } = await supabase
+    .from('contracts')
+    .select('contract_number')
+    .ilike('contract_number', `${prefix}%`);
+
+  if (error || !data || data.length === 0) {
+    return `${prefix}001`;
+  }
+
+  let maxSeq = 0;
+  for (const item of data) {
+    const parts = item.contract_number.split('-');
+    if (parts.length >= 3) {
+      const seq = parseInt(parts[2], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  const nextSeq = String(maxSeq + 1).padStart(3, '0');
+  return `${prefix}${nextSeq}`;
+}
+
+export async function getContracts(supabase: SupabaseClient, userId?: string): Promise<Contract[]> {
+  let query = supabase
+    .from('contracts')
+    .select(`
+      *,
+      investor:investors(*),
+      originator:originators(*),
+      rates:contract_rates(*),
+      movements:contract_movements(*)
+    `);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching contracts:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function getContractById(supabase: SupabaseClient, id: string, userId?: string): Promise<Contract | null> {
+  let query = supabase
+    .from('contracts')
+    .select(`
+      *,
+      investor:investors(*),
+      originator:originators(*),
+      rates:contract_rates(*),
+      movements:contract_movements(*)
+    `)
+    .eq('id', id);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data, error } = await query.single();
+
+  if (error) {
+    console.error(`Error fetching contract ${id}:`, error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function createContract(
+  supabase: SupabaseClient,
+  contractPayload: {
+    contract_number: string;
+    investor_name: string;
+    investor_id?: string | null;
+    user_id?: string | null;
+    start_date: string;
+    initial_amount: number;
+    cutoff_day: number;
+    payout_frequency?: 'MONTHLY' | 'BIMONTHLY' | 'SEMIANNUAL' | 'ANNUAL' | 'ON_DEMAND';
+    originator_id?: string | null;
+    notes?: string | null;
+  },
+  ratePayload: {
+    investor_annual_rate: number;
+    originator_annual_rate: number;
+    notes?: string | null;
+  }
+): Promise<Contract> {
+  // 1. Insert contract
+  const { data: contract, error: contractError } = await supabase
+    .from('contracts')
+    .insert([{
+      ...contractPayload,
+      status: 'Open'
+    }])
+    .select()
+    .single();
+
+  if (contractError) throw new Error(contractError.message);
+
+  // 2. Insert initial rate effective from start_date
+  const { error: rateError } = await supabase
+    .from('contract_rates')
+    .insert([{
+      contract_id: contract.id,
+      effective_date: contractPayload.start_date,
+      investor_annual_rate: ratePayload.investor_annual_rate,
+      originator_annual_rate: ratePayload.originator_annual_rate,
+      notes: ratePayload.notes || 'Initial agreed rate'
+    }]);
+
+  if (rateError) {
+    // Rollback contract creation if rate fails
+    await supabase.from('contracts').delete().eq('id', contract.id);
+    throw new Error(rateError.message);
+  }
+
+  // 3. Insert initial capital deposit movement
+  const { error: movError } = await supabase
+    .from('contract_movements')
+    .insert([{
+      contract_id: contract.id,
+      movement_type: 'CAPITAL_DEPOSIT',
+      amount: contractPayload.initial_amount,
+      movement_date: contractPayload.start_date,
+      notes: 'Initial capital contribution'
+    }]);
+
+  if (movError) {
+    console.warn('Initial movement creation failed, but contract was saved:', movError.message);
+  }
+
+  return getContractById(supabase, contract.id) as Promise<Contract>;
+}
+
+export async function updateContract(
+  supabase: SupabaseClient,
+  id: string,
+  payload: Partial<Contract>
+): Promise<Contract> {
+  const { data, error } = await supabase
+    .from('contracts')
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function addContractMovement(
+  supabase: SupabaseClient,
+  movement: {
+    contract_id: string;
+    movement_type: 'CAPITAL_DEPOSIT' | 'CAPITAL_WITHDRAWAL' | 'INTEREST_WITHDRAWAL';
+    amount: number;
+    movement_date: string;
+    agreed_withdrawal?: boolean;
+    notes?: string | null;
+  }
+): Promise<ContractMovement> {
+  const { data, error } = await supabase
+    .from('contract_movements')
+    .insert([movement])
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function addContractRateChange(
+  supabase: SupabaseClient,
+  rateChange: {
+    contract_id: string;
+    effective_date: string;
+    investor_annual_rate: number;
+    originator_annual_rate: number;
+    notes?: string | null;
+  }
+): Promise<ContractRate> {
+  const { data, error } = await supabase
+    .from('contract_rates')
+    .insert([rateChange])
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
 }

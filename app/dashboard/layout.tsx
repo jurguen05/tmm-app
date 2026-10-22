@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
@@ -12,6 +12,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
   const [modalAbierto, setModalAbierto] = useState(false)
   const [strategiesExpanded, setStrategiesExpanded] = useState(true)
+  const [userRole, setUserRole] = useState<number | null>(null)
+
+  useEffect(() => {
+    async function fetchUserRole() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role_id')
+            .eq('id', user.id)
+            .single()
+          if (profile) {
+            setUserRole(profile.role_id)
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching user role:', err)
+      }
+    }
+    fetchUserRole()
+  }, [])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -27,6 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <h2 className="text-2xl font-bold tracking-tight text-white">TMM System</h2>
             <ConsistencyAlertBadge />
           </div>
+          {userRole !== 2 && (
           <button
             onClick={() => setModalAbierto(true)}
             title="Upload CSVs"
@@ -34,9 +57,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             +
           </button>
+          )}
         </div>
         
         <nav className="flex-1 px-4 space-y-6 mt-2 overflow-y-auto">
+          {/* SI EL USUARIO ES INVERSOR (ROLE_ID === 2), SOLO VE SU PORTAL */}
+          {userRole === 2 ? (
+            <div className="space-y-1">
+              <div className="px-3 mb-2 text-indigo-400 font-semibold text-xs tracking-wider uppercase">
+                Investor Portal
+              </div>
+              <Link 
+                href="/dashboard/contracts"
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  pathname.startsWith('/dashboard/contracts')
+                    ? 'bg-indigo-600 text-white shadow-sm' 
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                }`}
+              >
+                <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>My Contract</span>
+              </Link>
+            </div>
+          ) : (
+            <>
           {/* CATEGORY 1: PORTFOLIO & TRADING */}
           <div className="space-y-1">
             <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
@@ -236,6 +282,60 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span>Monte Carlo</span>
             </Link>
           </div>
+
+          {/* CATEGORY 4: CAPITAL & CONTRACTS */}
+          <div className="space-y-1">
+            <div className="px-3 mb-2 text-gray-400 font-semibold text-xs tracking-wider uppercase">
+              Capital & Contracts
+            </div>
+
+            {/* Contracts */}
+            <Link 
+              href="/dashboard/contracts"
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/dashboard/contracts' || (pathname.startsWith('/dashboard/contracts/') && !pathname.startsWith('/dashboard/contracts/contacts') && !pathname.startsWith('/dashboard/contracts/originators') && !pathname.startsWith('/dashboard/contracts/investors'))
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span>Contracts</span>
+            </Link>
+
+            {/* Unified Contacts Directory */}
+            <Link 
+              href="/dashboard/contracts/contacts"
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/dashboard/contracts/contacts'
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>Contacts & Entities</span>
+            </Link>
+
+            {/* Originators */}
+            <Link 
+              href="/dashboard/contracts/originators"
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/dashboard/contracts/originators'
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>Originators</span>
+            </Link>
+          </div>
+            </>
+          )}
         </nav>
 
         <div className="p-4 border-t border-gray-800">
