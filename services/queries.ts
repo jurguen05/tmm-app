@@ -1264,6 +1264,11 @@ export async function resolveAndAssignTradesForTransactions(
       if (activeState && activeState.trade.trade_code) {
         code = Number(activeState.trade.trade_code);
         row.trade_code = code;
+
+        // Si es una compra y el trade activo aun carece de estrategia asignada, se envia a revision en Step 2 Modal
+        if (isBuy && !activeState.trade.strategy_id) {
+          newTradeCodes.add(code);
+        }
       } else {
         // No existe trade 'Open' para este unique_key ni para el símbolo -> generar nuevo trade_code en 'trades'
         code = nextTradeCode++;
@@ -1276,8 +1281,8 @@ export async function resolveAndAssignTradesForTransactions(
           symbol: row.symbol || masterExisting?.symbol || uKey,
           unique_key: masterExisting?.unique_key || uKey,
           instrument: (row.instrument || masterExisting?.instrument || 'Stock') as 'Stock' | 'Option',
-          strategy_id: masterExisting?.strategy_id ?? null,
-          stock_entry_price: masterExisting?.stock_entry_price ?? (row.instrument === 'Stock' ? row.price : null),
+          strategy_id: null,
+          stock_entry_price: (row.instrument === 'Stock' ? row.price : null),
           first_buy_date: row.date,
           status: isSell ? 'Closed' : 'Open',
           weekend_trader_flag: masterExisting?.weekend_trader_flag || false,
@@ -1300,8 +1305,8 @@ export async function resolveAndAssignTradesForTransactions(
         }
         tradesToUpsertMap.set(code, newTrade);
 
-        // SOLO compras nuevas de trades sin estrategia previa se envían a revisión en Step 2 Modal
-        if (isBuy && !masterExisting?.strategy_id) {
+        // Compras de trades nuevos siempre se envían a revisión en Step 2 Modal
+        if (isBuy) {
           newTradeCodes.add(code);
         }
       }
@@ -1412,17 +1417,12 @@ export async function syncTradesForCodes(
       txsByCode.get(code)!.push(t);
     }
 
-    // Limpieza de trades huérfanos: si un trade_code ya no tiene ninguna transacción (ej: se borró el archivo)
-    // REGLA CRÍTICA DE PROTECCIÓN: NUNCA eliminar trades de la tabla 'trades' si el usuario ya les asignó
-    // estrategia (strategy_id) o precio de entrada (stock_entry_price), para preservar sus configuraciones ante rollbacks o re-subidas de CSV.
+    // Limpieza de trades huerfanos: si un trade_code ya no tiene ninguna transaccion (ej: se borro el archivo),
+    // se elimina completamente de la tabla trades (Rollback completo - Opcion 1).
     const codesWithTxs = new Set(txsByCode.keys());
     const orphanCodes = uniqueCodes.filter(c => !codesWithTxs.has(c));
-    const orphanCodesToDelete = orphanCodes.filter(c => {
-      const ex = existingMap.get(c);
-      return !ex || (ex.strategy_id === null && (ex.stock_entry_price === null || ex.stock_entry_price === 0));
-    });
-    if (orphanCodesToDelete.length > 0) {
-      const { error: errDel } = await supabase.from('trades').delete().in('trade_code', orphanCodesToDelete);
+    if (orphanCodes.length > 0) {
+      const { error: errDel } = await supabase.from('trades').delete().in('trade_code', orphanCodes);
       if (errDel) {
         console.warn('[syncTradesForCodes] Error deleting orphan trades from trades table:', errDel.message);
       }
@@ -2294,7 +2294,7 @@ export async function getTradesForEnrichment(
     });
   }
 
-  return items.sort((a, b) => a.trade_code - b.trade_code);
+  return items.sort((a, b) => (a.symbol || '').localeCompare(b.symbol || '') || a.trade_code - b.trade_code);
 }
 
 // 41. Guardar masivamente enriquecimientos de trades (estrategias y precios de entrada)

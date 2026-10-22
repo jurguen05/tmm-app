@@ -76,7 +76,8 @@ export default function ReviewNewTradesModal({
         }
 
         setStrategies(strats || [])
-        setEnrichTrades(trades)
+        const sortedTrades = [...(trades || [])].sort((a, b) => (a.symbol || '').localeCompare(b.symbol || '') || a.trade_code - b.trade_code)
+        setEnrichTrades(sortedTrades)
       } catch (err: any) {
         console.error('[ReviewNewTradesModal] Error loading enrichment data:', err)
         if (isMounted) onCloseRef.current?.()
