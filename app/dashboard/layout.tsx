@@ -25,7 +25,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="p-6 flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight text-white">TMM System</h2>
-            <p className="text-xs text-gray-400 mt-1">Trading Management</p>
+            <ConsistencyAlertBadge />
           </div>
           <button
             onClick={() => setModalAbierto(true)}
@@ -260,16 +260,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <ConsistencyAlertBadge />
-            <button
-              onClick={() => setModalAbierto(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-sm shadow-indigo-600/20 transition-all cursor-pointer"
-            >
-              <span className="font-bold">+</span>
-              <span>Upload CSVs</span>
-            </button>
-          </div>
+
         </header>
 
         <main className="flex-1 overflow-y-auto">

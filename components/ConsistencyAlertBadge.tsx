@@ -65,25 +65,24 @@ export default function ConsistencyAlertBadge({ initialAudit }: ConsistencyAlert
         type="button"
         onClick={() => setIsModalOpen(true)}
         title={`${audit.totalCount} consistency issue(s) detected. Click to inspect details.`}
-        className={`group relative flex items-center gap-2 px-2.5 py-1 rounded-full transition-all cursor-pointer shadow-sm active:scale-95 ${
+        className={`group relative inline-flex items-center gap-1.5 px-2 py-0.5 mt-1.5 rounded-full transition-all cursor-pointer shadow-sm active:scale-95 ${
           isRed
-            ? 'bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 hover:border-red-500/70 text-red-300'
-            : 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 hover:border-amber-500/70 text-amber-300'
+            ? 'bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 hover:border-red-500/70 text-red-300'
+            : 'bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 hover:border-amber-500/70 text-amber-300'
         }`}
       >
         {/* Pulsing Dot */}
-        <span className="relative flex h-2 w-2">
+        <span className="relative flex h-1.5 w-1.5">
           <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
             isRed ? 'bg-red-400' : 'bg-amber-400'
           }`}></span>
-          <span className={`relative inline-flex rounded-full h-2 w-2 ${
+          <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
             isRed ? 'bg-red-500' : 'bg-amber-500'
           }`}></span>
         </span>
 
-        {/* Word "Issue" as requested */}
-        <span className="text-xs font-semibold tracking-wide">
-          Issue
+        <span className="text-[11px] font-semibold tracking-wide">
+          {audit.totalCount === 1 ? '1 Issue' : `${audit.totalCount} Issues`}
         </span>
       </button>
 
